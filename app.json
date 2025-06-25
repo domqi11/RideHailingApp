@@ -1,4 +1,48 @@
 {
-  "name": "RideHailingApp",
-  "displayName": "RideHailingApp"
+  "expo": {
+    "name": "RideHailingApp",
+    "slug": "ride-hailing-app",
+    "version": "1.0.0",
+    "sdkVersion": "53.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "config": {
+        "googleMapsApiKey": "your_google_maps_api_key_here"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": "your_google_maps_api_key_here"
+        }
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "platforms": ["ios", "android"],
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "This app needs access to location when open and in the background to show your current location on the map and provide ride services."
+        }
+      ]
+    ]
+  }
 }
