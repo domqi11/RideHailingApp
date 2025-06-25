@@ -5,7 +5,7 @@
  * @format
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -25,6 +25,7 @@ import {
   Ionicons,
   FontAwesome,
 } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import MapViewComponent from './components/MapView';
 import ErrorBoundary from './components/ErrorBoundary';
 import SimpleLocationInput from './components/SimpleLocationInput';
@@ -38,12 +39,70 @@ export default function RideHailingApp() {
   const [showLocationModal, setShowLocationModal] = useState(false);
   
   // Location state
-  const [pickupLocation, setPickupLocation] = useState({
-    latitude: 37.7749,
-    longitude: -122.4194,
-    address: 'Current Location',
-  });
+  const [pickupLocation, setPickupLocation] = useState(null);
   const [destinationLocation, setDestinationLocation] = useState(null);
+
+  // Automatically get user's current location when app loads
+  useEffect(() => {
+    getCurrentLocation();
+  }, []);
+
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        // Fallback to Melbourne if permission denied
+        setPickupLocation({
+          latitude: -37.8136,
+          longitude: 144.9631,
+          address: 'Current Location (Permission Required)',
+        });
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      // Use Google's Reverse Geocoding API for better address formatting
+      const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+      
+      try {
+        const response = await fetch(
+          `https://maps.googleapis.com/maps/api/geocode/json?latlng=${location.coords.latitude},${location.coords.longitude}&key=${apiKey}`
+        );
+        
+        const data = await response.json();
+        
+        if (data.status === 'OK' && data.results && data.results.length > 0) {
+          const address = data.results[0].formatted_address;
+          setPickupLocation({
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            address: address,
+          });
+        } else {
+          throw new Error('Geocoding failed');
+        }
+      } catch (error) {
+        console.log('Google Geocoding not available, using basic location');
+        // Fall back to basic location without formatted address
+        setPickupLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          address: 'Current Location',
+        });
+      }
+    } catch (error) {
+      console.error('Error getting current location:', error);
+      // Fallback to Melbourne
+      setPickupLocation({
+        latitude: -37.8136,
+        longitude: 144.9631,
+        address: 'Melbourne, Australia (Default)',
+      });
+    }
+  };
 
   // Location handlers
   const handleLocationSelected = (pickup: any, destination: any) => {
@@ -101,10 +160,16 @@ export default function RideHailingApp() {
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {/* Map Area */}
       <View style={styles.mapContainer}>
-        <MapViewComponent
-          pickupLocation={pickupLocation}
-          destinationLocation={destinationLocation}
-        />
+        {pickupLocation ? (
+          <MapViewComponent
+            pickupLocation={pickupLocation}
+            destinationLocation={destinationLocation}
+          />
+        ) : (
+          <View style={styles.loadingMapContainer}>
+            <Text style={styles.loadingMapText}>Loading your location...</Text>
+          </View>
+        )}
       </View>
 
       {/* Single "Where to?" Input */}
@@ -1332,5 +1397,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     color: '#EF4444',
+  },
+  loadingMapContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingMapText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#6B7280',
   },
 });
