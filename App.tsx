@@ -25,8 +25,9 @@ import {
   Ionicons,
   FontAwesome,
 } from '@expo/vector-icons';
-import GooglePlacesInput from './components/GooglePlacesInput';
 import MapViewComponent from './components/MapView';
+import ErrorBoundary from './components/ErrorBoundary';
+import SimpleLocationInput from './components/SimpleLocationInput';
 
 const { width } = Dimensions.get('window');
 
@@ -34,34 +35,27 @@ export default function RideHailingApp() {
   const [currentStep, setCurrentStep] = useState('booking');
   const [selectedRide, setSelectedRide] = useState(null);
   const [currentScreen, setCurrentScreen] = useState('home');
+  const [showLocationModal, setShowLocationModal] = useState(false);
   
   // Location state
   const [pickupLocation, setPickupLocation] = useState({
     latitude: 37.7749,
     longitude: -122.4194,
-    address: '123 Main Street',
+    address: 'Current Location',
   });
   const [destinationLocation, setDestinationLocation] = useState(null);
 
   // Location handlers
-  const handlePickupSelected = (place: any) => {
-    if (place.details && place.details.geometry) {
-      setPickupLocation({
-        latitude: place.details.geometry.location.lat,
-        longitude: place.details.geometry.location.lng,
-        address: place.data.description,
-      });
-    }
+  const handleLocationSelected = (pickup: any, destination: any) => {
+    setPickupLocation(pickup);
+    setDestinationLocation(destination);
+    setShowLocationModal(false);
   };
 
-  const handleDestinationSelected = (place: any) => {
-    if (place.details && place.details.geometry) {
-      setDestinationLocation({
-        latitude: place.details.geometry.location.lat,
-        longitude: place.details.geometry.location.lng,
-        address: place.data.description,
-      });
-    }
+  const handleCancelTrip = () => {
+    setCurrentStep('booking');
+    setDestinationLocation(null);
+    setSelectedRide(null);
   };
 
   const rideOptions = [
@@ -113,23 +107,48 @@ export default function RideHailingApp() {
         />
       </View>
 
-      {/* Location Inputs */}
+      {/* Single "Where to?" Input */}
       <View style={styles.inputContainer}>
-        <GooglePlacesInput
-          placeholder="From"
-          value={pickupLocation.address}
-          onPlaceSelected={handlePickupSelected}
-          editable={true}
-          pinColor="#3B82F6"
-        />
+        <TouchableOpacity 
+          style={styles.destinationInput}
+          onPress={() => setShowLocationModal(true)}
+        >
+          <View style={styles.destinationInputContent}>
+            <View style={styles.destinationIcon}>
+              <AntDesign name="search1" size={20} color="#6B7280" />
+            </View>
+            <View style={styles.destinationTextContainer}>
+              {destinationLocation ? (
+                <>
+                  <Text style={styles.destinationLabel}>Where to?</Text>
+                  <Text style={styles.destinationText} numberOfLines={1}>
+                    {destinationLocation.address}
+                  </Text>
+                </>
+              ) : (
+                <Text style={styles.destinationPlaceholder}>Where to?</Text>
+              )}
+            </View>
+            <View style={styles.destinationArrow}>
+              <AntDesign name="right" size={16} color="#9CA3AF" />
+            </View>
+          </View>
+        </TouchableOpacity>
 
-        <GooglePlacesInput
-          placeholder="Where to?"
-          value={destinationLocation?.address || ''}
-          onPlaceSelected={handleDestinationSelected}
-          editable={true}
-          pinColor="#EF4444"
-        />
+        {/* Current Location Display (if destination is set) */}
+        {destinationLocation && (
+          <View style={styles.currentLocationDisplay}>
+            <View style={styles.currentLocationContent}>
+              <View style={[styles.locationPin, { backgroundColor: '#3B82F6' }]} />
+              <View style={styles.currentLocationTextContainer}>
+                <Text style={styles.currentLocationLabel}>From</Text>
+                <Text style={styles.currentLocationText} numberOfLines={1}>
+                  {pickupLocation.address}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
       </View>
 
       {/* Quick Actions */}
@@ -157,11 +176,22 @@ export default function RideHailingApp() {
       </View>
 
       <TouchableOpacity
-        style={styles.primaryButton}
-        onPress={() => setCurrentStep('selecting')}
+        style={[styles.primaryButton, !destinationLocation && styles.primaryButtonDisabled]}
+        onPress={() => destinationLocation && setCurrentStep('selecting')}
+        disabled={!destinationLocation}
       >
-        <Text style={styles.primaryButtonText}>See Prices</Text>
+        <Text style={[styles.primaryButtonText, !destinationLocation && styles.primaryButtonTextDisabled]}>
+          See Prices
+        </Text>
       </TouchableOpacity>
+
+      {/* Location Selection Modal */}
+      <SimpleLocationInput
+        visible={showLocationModal}
+        onClose={() => setShowLocationModal(false)}
+        onLocationSelected={handleLocationSelected}
+        currentDestination={destinationLocation?.address}
+      />
     </ScrollView>
   );
 
@@ -369,7 +399,7 @@ export default function RideHailingApp() {
 
       <TouchableOpacity
         style={styles.cancelButton}
-        onPress={() => setCurrentStep('booking')}
+        onPress={handleCancelTrip}
       >
         <Text style={styles.cancelButtonText}>Cancel ride</Text>
       </TouchableOpacity>
@@ -526,42 +556,44 @@ export default function RideHailingApp() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor="white" />
-      
-      {/* Header */}
-      <View style={styles.appHeader}>
-        <View>
-          <Text style={styles.appHeaderTitle}>
-            {currentScreen === 'profile' ? 'Profile' : 'Rides'}
-          </Text>
-          {currentStep === 'booking' && currentScreen === 'home' && (
-            <Text style={styles.appHeaderSubtitle}>Good afternoon, John</Text>
-          )}
-        </View>
-        <TouchableOpacity
-          onPress={() => setCurrentScreen(currentScreen === 'profile' ? 'home' : 'profile')}
-        >
-          <View style={styles.headerAvatar}>
-            <Text style={styles.headerAvatarText}>JD</Text>
+    <ErrorBoundary>
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle="dark-content" backgroundColor="white" />
+        
+        {/* Header */}
+        <View style={styles.appHeader}>
+          <View>
+            <Text style={styles.appHeaderTitle}>
+              {currentScreen === 'profile' ? 'Profile' : 'Rides'}
+            </Text>
+            {currentStep === 'booking' && currentScreen === 'home' && (
+              <Text style={styles.appHeaderSubtitle}>Good afternoon, John</Text>
+            )}
           </View>
-        </TouchableOpacity>
-      </View>
-
-      {/* Back Button for Profile */}
-      {currentScreen === 'profile' && (
-        <View style={styles.profileBackHeader}>
           <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => setCurrentScreen('home')}
+            onPress={() => setCurrentScreen(currentScreen === 'profile' ? 'home' : 'profile')}
           >
-            <AntDesign name="arrowleft" size={24} color="#3B82F6" />
+            <View style={styles.headerAvatar}>
+              <Text style={styles.headerAvatarText}>JD</Text>
+            </View>
           </TouchableOpacity>
         </View>
-      )}
 
-      {renderCurrentScreen()}
-    </SafeAreaView>
+        {/* Back Button for Profile */}
+        {currentScreen === 'profile' && (
+          <View style={styles.profileBackHeader}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => setCurrentScreen('home')}
+            >
+              <AntDesign name="arrowleft" size={24} color="#3B82F6" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {renderCurrentScreen()}
+      </SafeAreaView>
+    </ErrorBoundary>
   );
 }
 
@@ -658,6 +690,76 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     marginBottom: 32,
+  },
+  destinationInput: {
+    height: 56,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  destinationInputContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  destinationIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 12,
+  },
+  destinationTextContainer: {
+    flex: 1,
+  },
+  destinationLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#6B7280',
+    marginBottom: 2,
+  },
+  destinationText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#111827',
+  },
+  destinationPlaceholder: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  destinationArrow: {
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  currentLocationDisplay: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    padding: 12,
+  },
+  currentLocationContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  locationPin: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  currentLocationTextContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  currentLocationLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#6B7280',
+    marginBottom: 2,
+  },
+  currentLocationText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#111827',
   },
   inputWrapper: {
     position: 'relative',

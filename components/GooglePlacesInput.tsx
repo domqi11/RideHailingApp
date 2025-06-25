@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Alert } from 'react-native';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import { AntDesign } from '@expo/vector-icons';
 
@@ -24,6 +24,31 @@ const GooglePlacesInput: React.FC<GooglePlacesInputProps> = ({
     console.warn('Google Maps API key not found. Please add EXPO_PUBLIC_GOOGLE_MAPS_API_KEY to your .env file');
   }
 
+  const handlePlaceSelection = (data: any, details: any = null) => {
+    try {
+      onPlaceSelected({ data, details });
+    } catch (error) {
+      console.error('Error in place selection:', error);
+      Alert.alert(
+        'Error',
+        'There was an issue selecting this location. Please try again.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  const handleError = (error: any) => {
+    console.error('GooglePlacesAutocomplete error:', error);
+    // Don't show alert for network errors as they're common
+    if (error?.message && !error.message.includes('network')) {
+      Alert.alert(
+        'Location Service Error',
+        'There was an issue with the location service. Please check your internet connection and try again.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={[styles.inputPin, { backgroundColor: pinColor }]} />
@@ -35,9 +60,7 @@ const GooglePlacesInput: React.FC<GooglePlacesInputProps> = ({
           style: styles.textInput,
           placeholderTextColor: '#9CA3AF',
         }}
-        onPress={(data, details = null) => {
-          onPlaceSelected({ data, details });
-        }}
+        onPress={handlePlaceSelection}
         query={{
           key: apiKey,
           language: 'en',
@@ -55,6 +78,12 @@ const GooglePlacesInput: React.FC<GooglePlacesInputProps> = ({
         enablePoweredByContainer={false}
         keepResultsAfterBlur={true}
         predefinedPlaces={[]}
+        onFail={handleError}
+        onNotFound={() => {
+          console.log('No results found');
+        }}
+        timeout={20000} // 20 second timeout
+        debounce={300} // Debounce searches for better performance
       />
       {!editable && (
         <View style={styles.searchButton}>
