@@ -106,9 +106,91 @@ export default function RideHailingApp() {
 
   // Location handlers
   const handleLocationSelected = (pickup: any, destination: any) => {
-    setPickupLocation(pickup);
-    setDestinationLocation(destination);
+    console.log('Location Selected:', { pickup, destination });
+    
+    // Ensure pickup location has valid coordinates
+    if (pickup && pickup.latitude && pickup.longitude) {
+      setPickupLocation({
+        latitude: pickup.latitude,
+        longitude: pickup.longitude,
+        address: pickup.address || 'Selected Location',
+      });
+    }
+    
+    // Only set destination if it has valid coordinates
+    if (destination && destination.latitude && destination.longitude) {
+      setDestinationLocation({
+        latitude: destination.latitude,
+        longitude: destination.longitude,
+        address: destination.address || 'Selected Destination',
+      });
+    } else if (destination && destination.address && !destination.latitude) {
+      // If destination only has address, keep the text but don't update coordinates
+      // This allows the UI to show the selected text while keeping map unchanged
+      console.log('Destination has address but no coordinates:', destination.address);
+    }
+    
+    // Close modal immediately for better responsiveness
     setShowLocationModal(false);
+  };
+
+  const handleLocationModalClose = () => {
+    // Use setTimeout to schedule the state update properly
+    setTimeout(() => {
+      setShowLocationModal(false);
+    }, 0);
+  };
+
+  const handleSeePrices = () => {
+    if (destinationLocation) {
+      setTimeout(() => {
+        setCurrentStep('selecting');
+      }, 0);
+    }
+  };
+
+  const handleBackToBooking = () => {
+    setTimeout(() => {
+      setCurrentStep('booking');
+    }, 0);
+  };
+
+  const handleConfirmRide = () => {
+    if (selectedRide) {
+      setTimeout(() => {
+        setCurrentStep('confirmed');
+      }, 0);
+    }
+  };
+
+  const handleTrackRide = () => {
+    setTimeout(() => {
+      setCurrentStep('tracking');
+    }, 0);
+  };
+
+  const handleToggleProfile = () => {
+    setTimeout(() => {
+      setCurrentScreen(currentScreen === 'profile' ? 'home' : 'profile');
+    }, 0);
+  };
+
+  const handleBackToHome = () => {
+    setTimeout(() => {
+      setCurrentScreen('home');
+    }, 0);
+  };
+
+  const handleSelectRide = (rideId: string) => {
+    setTimeout(() => {
+      setSelectedRide(rideId);
+    }, 0);
+  };
+
+  const handleOpenLocationModal = () => {
+    setTimeout(() => {
+      setShowLocationModal(true);
+    }, 0);
   };
 
   const handleCancelTrip = () => {
@@ -162,6 +244,7 @@ export default function RideHailingApp() {
       <View style={styles.mapContainer}>
         {pickupLocation ? (
           <MapViewComponent
+            key={`${pickupLocation.latitude}-${pickupLocation.longitude}-${destinationLocation?.latitude || 'none'}-${destinationLocation?.longitude || 'none'}`}
             pickupLocation={pickupLocation}
             destinationLocation={destinationLocation}
           />
@@ -172,48 +255,63 @@ export default function RideHailingApp() {
         )}
       </View>
 
-      {/* Single "Where to?" Input */}
+      {/* Address Input Section */}
       <View style={styles.inputContainer}>
-        <TouchableOpacity 
-          style={styles.destinationInput}
-          onPress={() => setShowLocationModal(true)}
-        >
-          <View style={styles.destinationInputContent}>
-            <View style={styles.destinationIcon}>
-              <AntDesign name="search1" size={20} color="#6B7280" />
-            </View>
-            <View style={styles.destinationTextContainer}>
-              {destinationLocation ? (
-                <>
-                  <Text style={styles.destinationLabel}>Where to?</Text>
-                  <Text style={styles.destinationText} numberOfLines={1}>
-                    {destinationLocation.address}
-                  </Text>
-                </>
-              ) : (
-                <Text style={styles.destinationPlaceholder}>Where to?</Text>
-              )}
-            </View>
-            <View style={styles.destinationArrow}>
-              <AntDesign name="right" size={16} color="#9CA3AF" />
-            </View>
-          </View>
-        </TouchableOpacity>
-
-        {/* Current Location Display (if destination is set) */}
-        {destinationLocation && (
-          <View style={styles.currentLocationDisplay}>
-            <View style={styles.currentLocationContent}>
-              <View style={[styles.locationPin, { backgroundColor: '#3B82F6' }]} />
-              <View style={styles.currentLocationTextContainer}>
-                <Text style={styles.currentLocationLabel}>From</Text>
-                <Text style={styles.currentLocationText} numberOfLines={1}>
-                  {pickupLocation.address}
+        <View style={styles.addressContainer}>
+          {/* From Address */}
+          <TouchableOpacity 
+            style={styles.addressField}
+            onPress={handleOpenLocationModal}
+            activeOpacity={0.7}
+          >
+            <View style={styles.addressFieldContent}>
+              <View style={styles.fromDot} />
+              <View style={styles.addressTextContainer}>
+                <Text style={styles.addressLabel}>From</Text>
+                <Text style={styles.addressText} numberOfLines={1}>
+                  {pickupLocation ? pickupLocation.address : 'Loading your location...'}
                 </Text>
               </View>
+              <TouchableOpacity onPress={getCurrentLocation} style={styles.refreshLocationButton}>
+                <Feather name="refresh-cw" size={16} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+
+          {/* Journey Line Connector */}
+          <View style={styles.journeyConnector}>
+            <View style={styles.connectorLine} />
+            <View style={styles.connectorIcon}>
+              <MaterialIcons name="swap-vert" size={14} color="#FFFFFF" />
             </View>
           </View>
-        )}
+
+          {/* Where To Field */}
+          <TouchableOpacity 
+            style={styles.addressField}
+            onPress={handleOpenLocationModal}
+            activeOpacity={0.7}
+          >
+            <View style={styles.addressFieldContent}>
+              <View style={styles.toDot} />
+              <View style={styles.addressTextContainer}>
+                {destinationLocation ? (
+                  <>
+                    <Text style={styles.addressLabel}>Where to?</Text>
+                    <Text style={styles.addressText} numberOfLines={1}>
+                      {destinationLocation.address}
+                    </Text>
+                  </>
+                ) : (
+                  <Text style={styles.wherePlaceholder}>Where to?</Text>
+                )}
+              </View>
+              <View style={styles.addressArrow}>
+                <AntDesign name="right" size={16} color="#9CA3AF" />
+              </View>
+            </View>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Quick Actions */}
@@ -242,7 +340,7 @@ export default function RideHailingApp() {
 
       <TouchableOpacity
         style={[styles.primaryButton, !destinationLocation && styles.primaryButtonDisabled]}
-        onPress={() => destinationLocation && setCurrentStep('selecting')}
+        onPress={handleSeePrices}
         disabled={!destinationLocation}
       >
         <Text style={[styles.primaryButtonText, !destinationLocation && styles.primaryButtonTextDisabled]}>
@@ -253,9 +351,11 @@ export default function RideHailingApp() {
       {/* Location Selection Modal */}
       <SimpleLocationInput
         visible={showLocationModal}
-        onClose={() => setShowLocationModal(false)}
+        onClose={handleLocationModalClose}
         onLocationSelected={handleLocationSelected}
         currentDestination={destinationLocation?.address}
+        currentPickup={pickupLocation?.address}
+        allowPickupEdit={true}
       />
     </ScrollView>
   );
@@ -265,7 +365,7 @@ export default function RideHailingApp() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => setCurrentStep('booking')}
+          onPress={handleBackToBooking}
         >
           <AntDesign name="arrowleft" size={24} color="#3B82F6" />
         </TouchableOpacity>
@@ -277,11 +377,11 @@ export default function RideHailingApp() {
 
       <View style={styles.tripCard}>
         <View style={styles.tripLocation}>
-          <View style={[styles.inputPin, { backgroundColor: '#3B82F6' }]} />
+          <View style={[styles.locationPin, { backgroundColor: '#3B82F6' }]} />
           <Text style={styles.tripLocationText}>{pickupLocation.address}</Text>
         </View>
         <View style={styles.tripLocation}>
-          <View style={[styles.inputPin, { backgroundColor: '#EF4444' }]} />
+          <View style={[styles.locationPin, { backgroundColor: '#EF4444' }]} />
           <Text style={styles.tripLocationText}>
             {destinationLocation?.address || '456 Oak Avenue'}
           </Text>
@@ -298,7 +398,7 @@ export default function RideHailingApp() {
                 styles.rideOption,
                 isSelected && styles.rideOptionSelected,
               ]}
-              onPress={() => setSelectedRide(ride.id)}
+              onPress={() => handleSelectRide(ride.id)}
             >
               <View style={styles.rideOptionContent}>
                 <View style={styles.rideOptionLeft}>
@@ -326,7 +426,7 @@ export default function RideHailingApp() {
 
       <TouchableOpacity
         style={[styles.primaryButton, !selectedRide && styles.primaryButtonDisabled]}
-        onPress={() => selectedRide && setCurrentStep('confirmed')}
+        onPress={handleConfirmRide}
         disabled={!selectedRide}
       >
         <Text style={[styles.primaryButtonText, !selectedRide && styles.primaryButtonTextDisabled]}>
@@ -400,7 +500,7 @@ export default function RideHailingApp() {
 
       <TouchableOpacity
         style={[styles.primaryButton, { backgroundColor: '#10B981' }]}
-        onPress={() => setCurrentStep('tracking')}
+        onPress={handleTrackRide}
       >
         <Text style={styles.primaryButtonText}>Track your ride</Text>
       </TouchableOpacity>
@@ -636,7 +736,7 @@ export default function RideHailingApp() {
             )}
           </View>
           <TouchableOpacity
-            onPress={() => setCurrentScreen(currentScreen === 'profile' ? 'home' : 'profile')}
+            onPress={handleToggleProfile}
           >
             <View style={styles.headerAvatar}>
               <Text style={styles.headerAvatarText}>JD</Text>
@@ -649,7 +749,7 @@ export default function RideHailingApp() {
           <View style={styles.profileBackHeader}>
             <TouchableOpacity
               style={styles.backButton}
-              onPress={() => setCurrentScreen('home')}
+              onPress={handleBackToHome}
             >
               <AntDesign name="arrowleft" size={24} color="#3B82F6" />
             </TouchableOpacity>
@@ -756,107 +856,105 @@ const styles = StyleSheet.create({
   inputContainer: {
     marginBottom: 32,
   },
-  destinationInput: {
-    height: 56,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
+  addressContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
   },
-  destinationInputContent: {
+  addressField: {
+    minHeight: 56,
+    justifyContent: 'center',
+  },
+  addressFieldContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 4,
   },
-  destinationIcon: {
-    width: 20,
-    height: 20,
-    marginRight: 12,
+  fromDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#3B82F6',
+    marginRight: 16,
   },
-  destinationTextContainer: {
+  addressTextContainer: {
     flex: 1,
   },
-  destinationLabel: {
+  addressLabel: {
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#6B7280',
-    marginBottom: 2,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
-  destinationText: {
+  addressText: {
     fontSize: 16,
     fontWeight: '500',
     color: '#111827',
+    lineHeight: 20,
   },
-  destinationPlaceholder: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#6B7280',
-  },
-  destinationArrow: {
-    width: 20,
-    height: 20,
+  refreshLocationButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  currentLocationDisplay: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
-    padding: 12,
-  },
-  currentLocationContent: {
+  journeyConnector: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginVertical: 12,
+    paddingLeft: 6,
   },
-  locationPin: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  connectorLine: {
+    width: 2,
+    height: 20,
+    backgroundColor: '#E5E7EB',
+    marginRight: 14,
   },
-  currentLocationTextContainer: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  currentLocationLabel: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#6B7280',
-    marginBottom: 2,
-  },
-  currentLocationText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#111827',
-  },
-  inputWrapper: {
-    position: 'relative',
-    marginBottom: 4,
-  },
-  input: {
-    height: 56,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    paddingLeft: 48,
-    paddingRight: 56,
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#111827',
-  },
-  inputPin: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    position: 'absolute',
-    left: 20,
-    top: 24,
-    zIndex: 1,
-  },
-  searchButton: {
-    position: 'absolute',
-    right: 8,
-    top: 8,
-    width: 40,
-    height: 40,
+  connectorIcon: {
+    width: 24,
+    height: 24,
     borderRadius: 12,
     backgroundColor: '#3B82F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#3B82F6',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  toDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#EF4444',
+    marginRight: 16,
+  },
+  wherePlaceholder: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#9CA3AF',
+  },
+  addressArrow: {
+    width: 24,
+    height: 24,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1407,5 +1505,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     color: '#6B7280',
+  },
+  locationPin: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    position: 'absolute',
   },
 });

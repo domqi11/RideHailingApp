@@ -47,29 +47,290 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
     longitudeDelta: 0.0421,
   };
 
+  // Custom map style for unique appearance
+  const customMapStyle = [
+    {
+      "elementType": "geometry",
+      "stylers": [
+        {
+          "color": "#f5f5f5"
+        }
+      ]
+    },
+    {
+      "elementType": "labels.icon",
+      "stylers": [
+        {
+          "visibility": "off"
+        }
+      ]
+    },
+    {
+      "elementType": "labels.text.fill",
+      "stylers": [
+        {
+          "color": "#616161"
+        }
+      ]
+    },
+    {
+      "elementType": "labels.text.stroke",
+      "stylers": [
+        {
+          "color": "#f5f5f5"
+        }
+      ]
+    },
+    {
+      "featureType": "administrative.land_parcel",
+      "elementType": "labels",
+      "stylers": [
+        {
+          "visibility": "off"
+        }
+      ]
+    },
+    {
+      "featureType": "administrative.land_parcel",
+      "elementType": "labels.text.fill",
+      "stylers": [
+        {
+          "color": "#bdbdbd"
+        }
+      ]
+    },
+    {
+      "featureType": "poi",
+      "elementType": "geometry",
+      "stylers": [
+        {
+          "color": "#eeeeee"
+        }
+      ]
+    },
+    {
+      "featureType": "poi",
+      "elementType": "labels.text",
+      "stylers": [
+        {
+          "visibility": "off"
+        }
+      ]
+    },
+    {
+      "featureType": "poi",
+      "elementType": "labels.text.fill",
+      "stylers": [
+        {
+          "color": "#757575"
+        }
+      ]
+    },
+    {
+      "featureType": "poi.business",
+      "stylers": [
+        {
+          "visibility": "off"
+        }
+      ]
+    },
+    {
+      "featureType": "poi.park",
+      "elementType": "geometry",
+      "stylers": [
+        {
+          "color": "#e5f5e5"
+        }
+      ]
+    },
+    {
+      "featureType": "poi.park",
+      "elementType": "labels.text",
+      "stylers": [
+        {
+          "visibility": "off"
+        }
+      ]
+    },
+    {
+      "featureType": "poi.park",
+      "elementType": "labels.text.fill",
+      "stylers": [
+        {
+          "color": "#9e9e9e"
+        }
+      ]
+    },
+    {
+      "featureType": "road",
+      "elementType": "geometry",
+      "stylers": [
+        {
+          "color": "#ffffff"
+        }
+      ]
+    },
+    {
+      "featureType": "road.arterial",
+      "elementType": "labels",
+      "stylers": [
+        {
+          "visibility": "off"
+        }
+      ]
+    },
+    {
+      "featureType": "road.arterial",
+      "elementType": "labels.text.fill",
+      "stylers": [
+        {
+          "color": "#757575"
+        }
+      ]
+    },
+    {
+      "featureType": "road.highway",
+      "elementType": "geometry",
+      "stylers": [
+        {
+          "color": "#dadada"
+        }
+      ]
+    },
+    {
+      "featureType": "road.highway",
+      "elementType": "labels",
+      "stylers": [
+        {
+          "visibility": "off"
+        }
+      ]
+    },
+    {
+      "featureType": "road.highway",
+      "elementType": "labels.text.fill",
+      "stylers": [
+        {
+          "color": "#616161"
+        }
+      ]
+    },
+    {
+      "featureType": "road.local",
+      "stylers": [
+        {
+          "visibility": "off"
+        }
+      ]
+    },
+    {
+      "featureType": "road.local",
+      "elementType": "labels",
+      "stylers": [
+        {
+          "visibility": "off"
+        }
+      ]
+    },
+    {
+      "featureType": "road.local",
+      "elementType": "labels.text.fill",
+      "stylers": [
+        {
+          "color": "#9e9e9e"
+        }
+      ]
+    },
+    {
+      "featureType": "transit",
+      "stylers": [
+        {
+          "visibility": "off"
+        }
+      ]
+    },
+    {
+      "featureType": "transit.line",
+      "elementType": "geometry",
+      "stylers": [
+        {
+          "color": "#e5e5e5"
+        }
+      ]
+    },
+    {
+      "featureType": "transit.station",
+      "elementType": "geometry",
+      "stylers": [
+        {
+          "color": "#eeeeee"
+        }
+      ]
+    },
+    {
+      "featureType": "water",
+      "elementType": "geometry",
+      "stylers": [
+        {
+          "color": "#c9e2f0"
+        }
+      ]
+    },
+    {
+      "featureType": "water",
+      "elementType": "labels.text",
+      "stylers": [
+        {
+          "visibility": "off"
+        }
+      ]
+    },
+    {
+      "featureType": "water",
+      "elementType": "labels.text.fill",
+      "stylers": [
+        {
+          "color": "#9e9e9e"
+        }
+      ]
+    }
+  ];
+
   const getDirections = async (origin: any, destination: any) => {
     if (!apiKey) {
       console.log('No API key available for directions');
       return;
     }
 
+    console.log('🗺️ Fetching directions from:', origin.address, 'to:', destination.address);
+
     try {
       setIsLoadingRoute(true);
       const originString = `${origin.latitude},${origin.longitude}`;
       const destinationString = `${destination.latitude},${destination.longitude}`;
+      
+      console.log('📍 Coordinates:', { originString, destinationString });
       
       const response = await fetch(
         `https://maps.googleapis.com/maps/api/directions/json?origin=${originString}&destination=${destinationString}&key=${apiKey}&mode=driving`
       );
       
       const data = await response.json();
+      console.log('🚗 Directions API Response Status:', data.status);
       
       if (data.status === 'OK' && data.routes && data.routes.length > 0) {
         const route = data.routes[0];
         const leg = route.legs[0];
         
+        console.log('✅ Route found:', {
+          distance: leg.distance.text,
+          duration: leg.duration.text,
+          polylinePoints: route.overview_polyline.points.length
+        });
+        
         // Decode polyline
         const points = decodePolyline(route.overview_polyline.points);
+        console.log('📍 Decoded route points:', points.length);
         
         setRoute({
           coordinates: points,
@@ -77,11 +338,11 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
           duration: leg.duration.text,
         });
       } else {
-        console.log('Directions API response:', data.status);
+        console.log('❌ Directions API response:', data.status, data.error_message);
         setRoute(null);
       }
     } catch (error) {
-      console.log('Error getting directions:', error);
+      console.log('❌ Error getting directions:', error);
       setRoute(null);
     } finally {
       setIsLoadingRoute(false);
@@ -133,6 +394,8 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
 
   useEffect(() => {
     if (pickupLocation && destinationLocation && mapRef.current) {
+      console.log('Map updating with both locations:', { pickupLocation, destinationLocation });
+      
       // Get directions between pickup and destination
       getDirections(pickupLocation, destinationLocation);
       
@@ -148,30 +411,53 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
         },
       ];
 
+      // Reduced delay for faster response
       setTimeout(() => {
-        mapRef.current?.fitToCoordinates(coordinates, {
-          edgePadding: {
-            top: 80,
-            right: 80,
-            bottom: 160,
-            left: 80,
-          },
-          animated: true,
-        });
-      }, 500);
+        if (mapRef.current) {
+          mapRef.current.fitToCoordinates(coordinates, {
+            edgePadding: {
+              top: 60,
+              right: 60,
+              bottom: 120,
+              left: 60,
+            },
+            animated: true,
+          });
+        }
+      }, 200);
     } else if (pickupLocation && mapRef.current) {
+      console.log('Map updating with pickup only:', pickupLocation);
       // Center on pickup location
       setRoute(null);
-      mapRef.current.animateToRegion({
-        latitude: pickupLocation.latitude,
-        longitude: pickupLocation.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
+      setTimeout(() => {
+        if (mapRef.current) {
+          mapRef.current.animateToRegion({
+            latitude: pickupLocation.latitude,
+            longitude: pickupLocation.longitude,
+            latitudeDelta: 0.008,
+            longitudeDelta: 0.008,
+          }, 1000);
+        }
+      }, 100);
     } else {
       setRoute(null);
     }
   }, [pickupLocation, destinationLocation]);
+
+  // Monitor route state changes
+  useEffect(() => {
+    if (route) {
+      console.log('🛣️ Route state updated:', {
+        coordinatesCount: route.coordinates.length,
+        distance: route.distance,
+        duration: route.duration,
+        firstPoint: route.coordinates[0],
+        lastPoint: route.coordinates[route.coordinates.length - 1]
+      });
+    } else {
+      console.log('🛣️ Route cleared/null');
+    }
+  }, [route]);
 
   return (
     <View style={[styles.container, { height }]}>
@@ -184,16 +470,28 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
         showsMyLocationButton={false}
         showsCompass={false}
         toolbarEnabled={false}
+        customMapStyle={customMapStyle}
       >
-        {/* Route Polyline */}
+        {/* Route Polyline with enhanced styling */}
         {route && route.coordinates.length > 0 && (
-          <Polyline
-            coordinates={route.coordinates}
-            strokeWidth={4}
-            strokeColor="#3B82F6"
-            lineCap="round"
-            lineJoin="round"
-          />
+          <>
+            {/* Shadow/outline polyline */}
+            <Polyline
+              coordinates={route.coordinates}
+              strokeWidth={8}
+              strokeColor="rgba(59, 130, 246, 0.2)"
+              lineCap="round"
+              lineJoin="round"
+            />
+            {/* Main route polyline */}
+            <Polyline
+              coordinates={route.coordinates}
+              strokeWidth={5}
+              strokeColor="#3B82F6"
+              lineCap="round"
+              lineJoin="round"
+            />
+          </>
         )}
 
         {/* Pickup Location Marker */}
@@ -207,10 +505,13 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
             description={pickupLocation.address}
             anchor={{ x: 0.5, y: 0.5 }}
           >
-            <View style={styles.pickupMarker}>
-              <View style={styles.pickupMarkerInner}>
-                <MaterialIcons name="my-location" size={16} color="#3B82F6" />
+            <View style={styles.pickupMarkerContainer}>
+              <View style={styles.pickupMarker}>
+                <View style={styles.pickupMarkerInner}>
+                  <View style={styles.pickupMarkerDot} />
+                </View>
               </View>
+              <View style={styles.markerPulse} />
             </View>
           </Marker>
         )}
@@ -226,26 +527,33 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
             description={destinationLocation.address}
             anchor={{ x: 0.5, y: 1 }}
           >
-            <View style={styles.destinationMarker}>
-              <View style={styles.destinationMarkerInner}>
-                <MaterialIcons name="place" size={20} color="#EF4444" />
+            <View style={styles.destinationMarkerContainer}>
+              <View style={styles.destinationMarker}>
+                <View style={styles.destinationMarkerInner}>
+                  <MaterialIcons name="place" size={18} color="#FFFFFF" />
+                </View>
               </View>
+              <View style={styles.destinationMarkerShadow} />
             </View>
           </Marker>
         )}
       </MapView>
 
-      {/* Route Info Card */}
+      {/* Enhanced Route Info Card */}
       {route && (
         <View style={styles.routeInfoCard}>
           <View style={styles.routeInfoContent}>
             <View style={styles.routeInfoItem}>
-              <MaterialIcons name="directions-car" size={16} color="#3B82F6" />
+              <View style={styles.routeIconContainer}>
+                <MaterialIcons name="directions-car" size={16} color="#FFFFFF" />
+              </View>
               <Text style={styles.routeInfoText}>{route.duration}</Text>
             </View>
             <View style={styles.routeInfoDivider} />
             <View style={styles.routeInfoItem}>
-              <MaterialIcons name="straighten" size={16} color="#6B7280" />
+              <View style={styles.routeIconContainer}>
+                <MaterialIcons name="straighten" size={16} color="#FFFFFF" />
+              </View>
               <Text style={styles.routeInfoText}>{route.distance}</Text>
             </View>
           </View>
@@ -261,17 +569,19 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
         </View>
       )}
 
-      {/* Location indicator overlay */}
-      <View style={styles.locationCard}>
-        <View style={styles.locationCardContent}>
-          <View style={styles.locationCardIcon}>
-            <MaterialIcons name="my-location" size={14} color="#3B82F6" />
+      {/* Modern location indicator overlay - only show when no route */}
+      {!route && (
+        <View style={styles.locationCard}>
+          <View style={styles.locationCardContent}>
+            <View style={styles.locationCardIcon}>
+              <MaterialIcons name="my-location" size={14} color="#FFFFFF" />
+            </View>
+            <Text style={styles.locationCardText} numberOfLines={1}>
+              {pickupLocation ? pickupLocation.address || 'Selected Location' : 'Current Location'}
+            </Text>
           </View>
-          <Text style={styles.locationCardText} numberOfLines={1}>
-            {pickupLocation ? pickupLocation.address || 'Selected Location' : 'Current Location'}
-          </Text>
         </View>
-      </View>
+      )}
     </View>
   );
 };
@@ -284,6 +594,9 @@ const styles = StyleSheet.create({
   },
   map: {
     flex: 1,
+  },
+  pickupMarkerContainer: {
+    position: 'relative',
   },
   pickupMarker: {
     width: 30,
@@ -303,6 +616,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  pickupMarkerDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#3B82F6',
+    marginTop: 13,
+    marginLeft: 13,
+  },
+  markerPulse: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    borderWidth: 2,
+    borderColor: 'rgba(59, 130, 246, 0.5)',
+  },
+  destinationMarkerContainer: {
+    position: 'relative',
+  },
   destinationMarker: {
     width: 30,
     height: 30,
@@ -321,15 +656,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  destinationMarkerShadow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+  },
   routeInfoCard: {
     position: 'absolute',
     bottom: 24,
     left: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 16,
-    padding: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 20,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
     borderWidth: 1,
-    borderColor: 'rgba(229, 231, 235, 0.5)',
+    borderColor: 'rgba(255, 255, 255, 0.8)',
   },
   routeInfoContent: {
     flexDirection: 'row',
@@ -376,11 +728,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 24,
     left: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 16,
-    padding: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 20,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
     borderWidth: 1,
-    borderColor: 'rgba(229, 231, 235, 0.5)',
+    borderColor: 'rgba(255, 255, 255, 0.8)',
   },
   locationCardContent: {
     flexDirection: 'row',
@@ -399,6 +759,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#111827',
+  },
+  routeIconContainer: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#3B82F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
 });
 

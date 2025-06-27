@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,9 +13,12 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
+  StatusBar,
 } from 'react-native';
-import { AntDesign, Feather } from '@expo/vector-icons';
+import { AntDesign, Feather, MaterialIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import * as Haptics from 'expo-haptics';
 
 const { height: screenHeight } = Dimensions.get('window');
 
@@ -24,6 +27,8 @@ interface SimpleLocationInputProps {
   onClose: () => void;
   onLocationSelected: (pickup: any, destination: any) => void;
   currentDestination?: string;
+  currentPickup?: string;
+  allowPickupEdit?: boolean;
 }
 
 interface PlacePrediction {
@@ -40,37 +45,128 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
   onClose,
   onLocationSelected,
   currentDestination,
+  currentPickup,
+  allowPickupEdit = false,
 }) => {
   const [slideAnim] = useState(new Animated.Value(screenHeight));
   const [currentLocation, setCurrentLocation] = useState<any>(null);
   const [loadingLocation, setLoadingLocation] = useState(true);
+  const [pickupText, setPickupText] = useState(currentPickup || '');
   const [destinationText, setDestinationText] = useState(currentDestination || '');
+  const [editingField, setEditingField] = useState<'pickup' | 'destination'>('destination');
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
   const [showPredictions, setShowPredictions] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Refs for better performance
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isClosingRef = useRef(false);
+  const isMountedRef = useRef(true);
 
   // Use environment variable instead of hardcoded key
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
+  // Cleanup function
+  const cleanup = useCallback(() => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+      searchTimeoutRef.current = null;
+    }
+    setShowPredictions(false);
+    setPredictions([]);
+    setIsSearching(false);
+    setIsSubmitting(false);
+  }, []);
+
+  // Optimized field switching
+  const switchToField = useCallback((field: 'pickup' | 'destination') => {
+    if (editingField !== field) {
+      // Add haptic feedback for field switching
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      
+      // Immediate cleanup and switch
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+        searchTimeoutRef.current = null;
+      }
+      setShowPredictions(false);
+      setPredictions([]);
+      setIsSearching(false);
+      
+      // Immediate field switch
+      setEditingField(field);
+    }
+  }, [editingField]);
+
+  // Enhanced useEffect with proper cleanup
+  React.useEffect(() => {
+    isMountedRef.current = true;
+    isClosingRef.current = false;
+
+    if (visible) {
+      // Immediate state updates for better responsiveness
+      setPickupText(currentPickup || '');
+      setDestinationText(currentDestination || '');
+      // Always start with pickup field when pickup editing is allowed
+      setEditingField(allowPickupEdit ? 'pickup' : 'destination');
+      getCurrentLocation();
+      
+      // Faster, smoother opening animation
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 150,
+        friction: 12,
+        velocity: 0,
+        overshootClamping: false,
+        restDisplacementThreshold: 0.5,
+        restSpeedThreshold: 0.5,
+      }).start();
+    } else {
+      isClosingRef.current = true;
+      cleanup();
+      
+      // Faster closing animation
+      Animated.spring(slideAnim, {
+        toValue: screenHeight,
+        useNativeDriver: true,
+        tension: 120,
+        friction: 8,
+        overshootClamping: true,
+        restDisplacementThreshold: 0.5,
+        restSpeedThreshold: 0.5,
+      }).start();
+    }
+
+    return () => {
+      isMountedRef.current = false;
+      cleanup();
+    };
+  }, [visible, currentPickup, currentDestination, allowPickupEdit]);
+
+  // Safe state update helper
+  const safeSetState = useCallback((updateFn: () => void) => {
+    // Use requestAnimationFrame to schedule updates properly
+    requestAnimationFrame(() => {
+      if (isMountedRef.current && !isClosingRef.current) {
+        updateFn();
+      }
+    });
+  }, []);
+
   // Test API key function (for debugging)
   const testApiKey = async () => {
     if (!apiKey) {
-      console.log('❌ No valid API key to test');
       return;
     }
 
     try {
-      console.log('🧪 Testing API key with simple geocoding request...');
       const response = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?address=1600+Amphitheatre+Parkway,+Mountain+View,+CA&key=${apiKey}`
+        `https://maps.googleapis.com/maps/api/geocode/json?address=Melbourne,VIC,Australia&key=${apiKey}`
       );
       
       const data = await response.json();
-      console.log('🧪 API Test Result:', {
-        status: data.status,
-        hasResults: data.results?.length > 0,
-        errorMessage: data.error_message
-      });
       
       if (data.status === 'REQUEST_DENIED') {
         console.log('❌ API Key denied. Check restrictions and billing in Google Cloud Console');
@@ -83,49 +179,35 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
   };
 
   React.useEffect(() => {
-    // Debug API key detection (without exposing the actual key)
-    console.log('API Key Status:', {
-      hasKey: !!apiKey,
-      keyLength: apiKey?.length || 0,
-      keyPrefix: apiKey?.substring(0, 8) || 'none',
-      isPlaceholder: false
-    });
-    
-    // Test the API key when modal opens
-    if (visible && apiKey) {
-      testApiKey();
+    // Only test API key once when component mounts and has API key
+    if (apiKey && isMountedRef.current) {
+      // Schedule API test after component is fully mounted
+      const timeoutId = setTimeout(() => {
+        if (isMountedRef.current) {
+          testApiKey();
+        }
+      }, 100);
+      
+      return () => {
+        clearTimeout(timeoutId);
+      };
     }
-    
-    if (visible) {
-      getCurrentLocation();
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 100,
-        friction: 8,
-      }).start();
-    } else {
-      Animated.spring(slideAnim, {
-        toValue: screenHeight,
-        useNativeDriver: true,
-        tension: 100,
-        friction: 8,
-      }).start();
-    }
-  }, [visible]);
+  }, [apiKey]);
 
   const getCurrentLocation = async () => {
     try {
-      setLoadingLocation(true);
+      safeSetState(() => setLoadingLocation(true));
       
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        setCurrentLocation({
-          latitude: -37.8136,
-          longitude: 144.9631,
-          address: 'Current Location (Permission Required)',
+        safeSetState(() => {
+          setCurrentLocation({
+            latitude: -37.8136,
+            longitude: 144.9631,
+            address: 'Current Location (Permission Required)',
+          });
+          setLoadingLocation(false);
         });
-        setLoadingLocation(false);
         return;
       }
 
@@ -134,7 +216,7 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
       });
 
       // Use Google's Reverse Geocoding API for better address formatting
-      if (apiKey) {
+      if (apiKey && isMountedRef.current) {
         try {
           const response = await fetch(
             `https://maps.googleapis.com/maps/api/geocode/json?latlng=${location.coords.latitude},${location.coords.longitude}&key=${apiKey}`
@@ -148,10 +230,13 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
           
           if (data.status === 'OK' && data.results && data.results.length > 0) {
             const address = data.results[0].formatted_address;
-            setCurrentLocation({
-              latitude: location.coords.latitude,
-              longitude: location.coords.longitude,
-              address: address,
+            safeSetState(() => {
+              setCurrentLocation({
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+                address: address,
+              });
+              setLoadingLocation(false);
             });
           } else {
             console.log('Google Geocoding response:', data.status, data.error_message);
@@ -169,13 +254,14 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
       }
     } catch (error) {
       console.error('Error getting current location:', error);
-      setCurrentLocation({
-        latitude: 37.7749,
-        longitude: -122.4194,
-        address: 'San Francisco, CA (Default)',
+      safeSetState(() => {
+        setCurrentLocation({
+          latitude: -37.8136,
+          longitude: 144.9631,
+          address: 'Melbourne, Australia (Default)',
+        });
+        setLoadingLocation(false);
       });
-    } finally {
-      setLoadingLocation(false);
     }
   };
 
@@ -193,65 +279,138 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
         if (address.startsWith(', ')) address = address.substring(2);
       }
 
-      setCurrentLocation({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        address: address,
+      safeSetState(() => {
+        setCurrentLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          address: address,
+        });
+        setLoadingLocation(false);
       });
     } catch (error) {
       console.error('Expo geocoding error:', error);
-      setCurrentLocation({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        address: 'Current Location',
+      safeSetState(() => {
+        setCurrentLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          address: 'Current Location',
+        });
+        setLoadingLocation(false);
       });
     }
   };
 
   const searchPlaces = async (query: string) => {
-    if (!apiKey || query.length < 2) {
-      setPredictions([]);
-      setShowPredictions(false);
+    if (!apiKey || query.length < 2 || !isMountedRef.current) {
+      safeSetState(() => {
+        setPredictions([]);
+        setShowPredictions(false);
+        setIsSearching(false);
+      });
       return;
     }
 
     try {
-      setIsSearching(true);
+      safeSetState(() => setIsSearching(true));
       
       // Get current location for better biasing if available
       let locationBias = '';
       if (currentLocation && currentLocation.latitude && currentLocation.longitude) {
         // Use actual current location for biasing
-        locationBias = `&location=${currentLocation.latitude},${currentLocation.longitude}&radius=50000`;
+        locationBias = `&location=${currentLocation.latitude},${currentLocation.longitude}&radius=100000`;
       } else {
         // Default to Melbourne, Australia center for biasing
-        locationBias = '&location=-37.8136,144.9631&radius=100000';
+        locationBias = '&location=-37.8136,144.9631&radius=200000';
       }
       
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${apiKey}&types=address&components=country:au${locationBias}`
-      );
+      // Try comprehensive search first (like Google Maps)
+      let allPredictions = [];
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      try {
+        // Search 1: General places and addresses (most comprehensive)
+        const generalResponse = await fetch(
+          `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${apiKey}&components=country:au${locationBias}&language=en`
+        );
+        
+        if (generalResponse.ok) {
+          const generalData = await generalResponse.json();
+          if (generalData.status === 'OK' && generalData.predictions) {
+            allPredictions = [...generalData.predictions];
+          }
+        }
+        
+        // Search 2: If we don't have many results, try establishment search
+        if (allPredictions.length < 4) {
+          const establishmentResponse = await fetch(
+            `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${apiKey}&types=establishment&components=country:au${locationBias}&language=en`
+          );
+          
+          if (establishmentResponse.ok) {
+            const establishmentData = await establishmentResponse.json();
+            if (establishmentData.status === 'OK' && establishmentData.predictions) {
+              // Merge unique results
+              const existingPlaceIds = new Set(allPredictions.map(p => p.place_id));
+              const newPredictions = establishmentData.predictions.filter(p => !existingPlaceIds.has(p.place_id));
+              allPredictions = [...allPredictions, ...newPredictions];
+            }
+          }
+        }
+        
+        // Search 3: If still not enough, try geocoding search for addresses
+        if (allPredictions.length < 4) {
+          const addressResponse = await fetch(
+            `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${apiKey}&types=address&components=country:au${locationBias}&language=en`
+          );
+          
+          if (addressResponse.ok) {
+            const addressData = await addressResponse.json();
+            if (addressData.status === 'OK' && addressData.predictions) {
+              // Merge unique results
+              const existingPlaceIds = new Set(allPredictions.map(p => p.place_id));
+              const newPredictions = addressData.predictions.filter(p => !existingPlaceIds.has(p.place_id));
+              allPredictions = [...allPredictions, ...newPredictions];
+            }
+          }
+        }
+      } catch (searchError) {
+        console.log('Enhanced search failed, falling back to basic search:', searchError.message);
+        
+        // Fallback to original search
+        const response = await fetch(
+          `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${apiKey}&components=country:au${locationBias}&language=en`
+        );
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        if (data.status === 'OK' && data.predictions) {
+          allPredictions = data.predictions;
+        }
       }
-      
-      const data = await response.json();
 
-      if (data.status === 'OK' && data.predictions) {
-        setPredictions(data.predictions.slice(0, 5)); // Limit to 5 results
-        setShowPredictions(true);
+      if (allPredictions.length > 0 && isMountedRef.current) {
+        safeSetState(() => {
+          setPredictions(allPredictions.slice(0, 8)); // Take best 8 results
+          setShowPredictions(true);
+          setIsSearching(false);
+        });
       } else {
-        console.log('Places API response:', data.status, data.error_message);
-        setPredictions([]);
-        setShowPredictions(false);
+        console.log('No predictions found for query:', query);
+        safeSetState(() => {
+          setPredictions([]);
+          setShowPredictions(false);
+          setIsSearching(false);
+        });
       }
     } catch (error) {
       console.log('Places API not available:', error.message);
-      setPredictions([]);
-      setShowPredictions(false);
-    } finally {
-      setIsSearching(false);
+      safeSetState(() => {
+        setPredictions([]);
+        setShowPredictions(false);
+        setIsSearching(false);
+      });
     }
   };
 
@@ -281,149 +440,274 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
     }
   };
 
-  const handleTextChange = (text: string) => {
-    setDestinationText(text);
+  // Optimized text change handler with proper debouncing
+  const handleTextChange = useCallback((text: string) => {
+    if (editingField === 'pickup') {
+      setPickupText(text);
+    } else {
+      setDestinationText(text);
+    }
     
-    // Debounce the search
-    clearTimeout((handleTextChange as any).searchTimeout);
-    (handleTextChange as any).searchTimeout = setTimeout(() => {
-      searchPlaces(text);
-    }, 300);
-  };
+    // Clear existing timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
+    // Reduced timeout for faster response
+    searchTimeoutRef.current = setTimeout(() => {
+      if (isMountedRef.current && !isClosingRef.current) {
+        searchPlaces(text);
+      }
+    }, 200);
+  }, [editingField]);
 
-  const handlePredictionSelect = async (prediction: PlacePrediction) => {
+  const handlePredictionSelect = useCallback(async (prediction: PlacePrediction) => {
     try {
-      setDestinationText(prediction.description);
-      setShowPredictions(false);
-      setPredictions([]);
-
-      const placeDetails = await getPlaceDetails(prediction.place_id);
+      // Add haptic feedback for selection
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       
-      if (currentLocation) {
-        onLocationSelected(currentLocation, placeDetails);
-        onClose();
+      // Immediate visual feedback - update text first
+      if (editingField === 'pickup') {
+        setPickupText(prediction.description);
+        // Clear predictions immediately for better UX
+        setShowPredictions(false);
+        setPredictions([]);
+        
+        // Get place details in background
+        const placeDetails = await getPlaceDetails(prediction.place_id);
+        console.log('Pickup place details retrieved:', placeDetails);
+        
+        // Update parent immediately with new pickup
+        let destination = null;
+        if (destinationText && destinationText.trim()) {
+          destination = { address: destinationText };
+        }
+        onLocationSelected(placeDetails, destination);
+        
+        // Switch to destination field smoothly
+        setEditingField('destination');
+        
+        return;
+      } else {
+        setDestinationText(prediction.description);
+        // Clear predictions immediately
+        setShowPredictions(false);
+        setPredictions([]);
+
+        // Get place details
+        const placeDetails = await getPlaceDetails(prediction.place_id);
+        console.log('Destination place details retrieved:', placeDetails);
+        
+        // For destination, use current pickup location
+        let pickup = currentLocation;
+        if (allowPickupEdit && pickupText && pickupText.trim()) {
+          pickup = currentLocation ? {
+            ...currentLocation,
+            address: pickupText
+          } : { address: pickupText };
+        }
+        
+        // Update parent immediately
+        onLocationSelected(pickup, placeDetails);
+        
+        // Close modal with slight delay for smooth transition
+        setTimeout(() => {
+          handleClose();
+        }, 100);
       }
     } catch (error) {
       console.error('Error selecting prediction:', error);
       Alert.alert('Error', 'Unable to get location details. Please try again.');
     }
-  };
+  }, [editingField, destinationText, allowPickupEdit, pickupText, currentLocation, onLocationSelected]);
 
-  const handleSubmit = async () => {
-    if (!destinationText.trim()) {
+  const handleSubmit = useCallback(async () => {
+    // If editing pickup and it's empty, require pickup
+    if (editingField === 'pickup' && !pickupText.trim()) {
+      Alert.alert('Error', 'Please enter a pickup address.');
+      return;
+    }
+    
+    // If editing destination and it's empty, require destination  
+    if (editingField === 'destination' && !destinationText.trim()) {
       Alert.alert('Error', 'Please enter a destination address.');
       return;
     }
 
-    if (!currentLocation) {
-      Alert.alert('Error', 'Current location not available.');
+    // For pickup editing mode, check if we should switch to destination
+    if (allowPickupEdit && editingField === 'pickup' && pickupText.trim() && !destinationText.trim()) {
+      // Pickup is filled but destination is empty - switch to destination field
+      setEditingField('destination');
       return;
     }
 
-    // If we have an exact match from predictions, use that
-    if (predictions.length > 0) {
-      const exactMatch = predictions.find(p => 
-        p.description.toLowerCase() === destinationText.toLowerCase()
-      );
-      if (exactMatch) {
-        await handlePredictionSelect(exactMatch);
-        return;
-      }
+    // For pickup editing, we need both addresses to submit
+    if (allowPickupEdit && (!pickupText.trim() || !destinationText.trim())) {
+      Alert.alert('Error', 'Please enter both pickup and destination addresses.');
+      return;
     }
 
-    // Otherwise, try to geocode the entered text
-    if (apiKey) {
-      try {
-        const response = await fetch(
-          `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(destinationText)}&key=${apiKey}`
-        );
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
+    const currentText = editingField === 'pickup' ? pickupText : destinationText;
+    setIsSubmitting(true);
 
-        if (data.status === 'OK' && data.results && data.results.length > 0) {
-          const result = data.results[0];
-          const destination = {
-            latitude: result.geometry.location.lat,
-            longitude: result.geometry.location.lng,
-            address: result.formatted_address,
-          };
-          
-          onLocationSelected(currentLocation, destination);
-          onClose();
-        } else {
-          console.log('Geocoding response:', data.status, data.error_message);
-          Alert.alert('Address Not Found', 'Could not find this address. Please try a different address or check your spelling.');
-        }
-      } catch (error) {
-        console.log('Geocoding not available:', error.message);
-        // Show user that we're using basic functionality
-        Alert.alert(
-          'Limited Functionality', 
-          'Address validation is not available. The destination will be saved as entered.', 
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Continue', 
-              onPress: () => {
-                const destination = {
-                  latitude: 37.7849, // Mock coordinates
-                  longitude: -122.4094,
-                  address: destinationText.trim(),
-                };
-                
-                onLocationSelected(currentLocation, destination);
-                onClose();
-              }
-            }
-          ]
+    try {
+      // If we have an exact match from predictions, use that
+      if (predictions.length > 0) {
+        const exactMatch = predictions.find(p => 
+          p.description.toLowerCase() === currentText.toLowerCase()
         );
+        if (exactMatch) {
+          await handlePredictionSelect(exactMatch);
+          return;
+        }
       }
-    } else {
-      // Fallback without API key - inform user of limited functionality
-      Alert.alert(
-        'Basic Mode', 
-        'Address validation requires Google Maps setup. The destination will be saved as entered.', 
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Continue', 
-            onPress: () => {
+
+      // Otherwise, try to geocode the entered text
+      if (apiKey) {
+        try {
+          const response = await fetch(
+            `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(currentText)}&key=${apiKey}`
+          );
+          
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          
+          const data = await response.json();
+
+          if (data.status === 'OK' && data.results && data.results.length > 0) {
+            const result = data.results[0];
+            const geocodedLocation = {
+              latitude: result.geometry.location.lat,
+              longitude: result.geometry.location.lng,
+              address: result.formatted_address,
+            };
+            
+            if (allowPickupEdit) {
+              // Handle both pickup and destination
+              let pickup, destination;
+              
+              if (editingField === 'pickup') {
+                pickup = geocodedLocation;
+                // If destination is filled, geocode it too
+                if (destinationText.trim()) {
+                  try {
+                    const destResponse = await fetch(
+                      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(destinationText)}&key=${apiKey}`
+                    );
+                    const destData = await destResponse.json();
+                    if (destData.status === 'OK' && destData.results?.length > 0) {
+                      destination = {
+                        latitude: destData.results[0].geometry.location.lat,
+                        longitude: destData.results[0].geometry.location.lng,
+                        address: destData.results[0].formatted_address,
+                      };
+                    }
+                  } catch (error) {
+                    console.log('Destination geocoding failed:', error);
+                  }
+                }
+                
+                // Switch to destination field instead of closing
+                onLocationSelected(pickup, destination);
+                setEditingField('destination');
+                return;
+              } else {
+                destination = geocodedLocation;
+                // Use pickup text for pickup
+                pickup = pickupText.trim() ? { address: pickupText } : currentLocation;
+                onLocationSelected(pickup, destination);
+                handleClose();
+              }
+            } else {
+              // Original behavior for destination only
+              onLocationSelected(currentLocation, geocodedLocation);
+              handleClose();
+            }
+          } else {
+            console.log('Geocoding response:', data.status, data.error_message);
+            Alert.alert('Address Not Found', 'Could not find this address. Please try a different address or check your spelling.');
+          }
+        } catch (error) {
+          console.log('Geocoding not available:', error.message);
+          handleBasicSubmit();
+        }
+      } else {
+        handleBasicSubmit();
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [editingField, pickupText, destinationText, allowPickupEdit, predictions, apiKey, currentLocation, handlePredictionSelect, onLocationSelected]);
+
+  const handleBasicSubmit = () => {
+    Alert.alert(
+      'Basic Mode', 
+      'Address validation requires Google Maps setup. The addresses will be saved as entered.', 
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Continue', 
+          onPress: () => {
+            if (allowPickupEdit) {
+              const pickup = {
+                latitude: -37.8136, // Mock coordinates
+                longitude: 144.9631,
+                address: pickupText.trim() || 'Current Location',
+              };
               const destination = {
-                latitude: 37.7849, // Mock coordinates
-                longitude: -122.4094,
+                latitude: -37.8136, // Mock coordinates
+                longitude: 144.9631,
                 address: destinationText.trim(),
               };
-              
+              onLocationSelected(pickup, destination);
+            } else {
+              const destination = {
+                latitude: -37.8136, // Mock coordinates
+                longitude: 144.9631,
+                address: destinationText.trim(),
+              };
               onLocationSelected(currentLocation, destination);
-              onClose();
             }
+            onClose();
           }
-        ]
-      );
-    }
+        }
+      ]
+    );
   };
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
+    if (isClosingRef.current) return;
+    
+    isClosingRef.current = true;
+    Keyboard.dismiss();
+    
+    // Clear state immediately
     setShowPredictions(false);
     setPredictions([]);
+    setIsSearching(false);
+    
+    // Faster close animation
     Animated.spring(slideAnim, {
       toValue: screenHeight,
       useNativeDriver: true,
-      tension: 100,
-      friction: 8,
+      tension: 130,
+      friction: 9,
+      overshootClamping: true,
+      restDisplacementThreshold: 0.5,
+      restSpeedThreshold: 0.5,
     }).start(() => {
-      onClose();
+      if (isMountedRef.current) {
+        onClose();
+      }
     });
-  };
+  }, [onClose]);
 
-  const renderPrediction = ({ item }: { item: PlacePrediction }) => (
+  const renderPrediction = useCallback(({ item }: { item: PlacePrediction }) => (
     <TouchableOpacity 
       style={styles.predictionItem}
       onPress={() => handlePredictionSelect(item)}
+      activeOpacity={0.7}
     >
       <View style={styles.predictionContent}>
         <AntDesign name="enviromento" size={16} color="#9CA3AF" style={styles.predictionIcon} />
@@ -437,7 +721,7 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
         </View>
       </View>
     </TouchableOpacity>
-  );
+  ), [handlePredictionSelect]);
 
   return (
     <Modal
@@ -458,11 +742,27 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
             onPress={handleClose}
           />
           
-          <Animated.View 
+          <Animated.View
+            style={[
+              styles.backdrop,
+              {
+                opacity: slideAnim.interpolate({
+                  inputRange: [0, screenHeight],
+                  outputRange: [0.6, 0],
+                  extrapolate: 'clamp',
+                }),
+              },
+            ]}
+          />
+          <Animated.View
             style={[
               styles.modalContainer,
               {
-                transform: [{ translateY: slideAnim }],
+                transform: [
+                  {
+                    translateY: slideAnim,
+                  },
+                ],
               },
             ]}
           >
@@ -477,48 +777,134 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
               </View>
             </View>
 
-            {/* Current Location Display */}
-            <View style={styles.locationSection}>
-              <View style={styles.locationItem}>
-                <View style={[styles.locationPin, { backgroundColor: '#3B82F6' }]} />
-                <View style={styles.locationContent}>
-                  <Text style={styles.locationLabel}>From</Text>
-                  {loadingLocation ? (
-                    <Text style={styles.loadingText}>Detecting current location...</Text>
-                  ) : (
-                    <Text style={styles.locationText}>{currentLocation?.address}</Text>
+            {/* Address Fields */}
+            <View style={styles.addressFieldsContainer}>
+              {/* Pickup Address Field */}
+              {allowPickupEdit && (
+                <TouchableOpacity 
+                  style={[styles.addressInputField, editingField === 'pickup' && styles.activeField]}
+                  onPress={() => switchToField('pickup')}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.addressFieldContent}>
+                    <View style={[styles.addressDot, { backgroundColor: '#3B82F6' }]} />
+                    <View style={styles.addressFieldInfo}>
+                      <Text style={styles.fieldLabel}>From</Text>
+                      {editingField === 'pickup' ? (
+                        <TextInput
+                          style={styles.addressInput}
+                          placeholder="Enter pickup address"
+                          placeholderTextColor="#9CA3AF"
+                          value={pickupText}
+                          onChangeText={handleTextChange}
+                          autoFocus
+                          returnKeyType="search"
+                          autoCorrect={false}
+                          autoCapitalize="words"
+                          blurOnSubmit={false}
+                          onSubmitEditing={() => {
+                            if (predictions.length > 0) {
+                              handlePredictionSelect(predictions[0]);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <Text style={styles.addressDisplayText} numberOfLines={1}>
+                          {pickupText || currentLocation?.address || 'Loading...'}
+                        </Text>
+                      )}
+                    </View>
+                    {editingField === 'pickup' && (
+                      <TouchableOpacity 
+                        onPress={() => switchToField('destination')} 
+                        style={styles.switchFieldButton}
+                      >
+                        <AntDesign name="down" size={16} color="#6B7280" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              )}
+
+              {/* Static Pickup Display (when not editable) */}
+              {!allowPickupEdit && (
+                <View style={styles.addressInputField}>
+                  <View style={styles.addressFieldContent}>
+                    <View style={[styles.addressDot, { backgroundColor: '#3B82F6' }]} />
+                    <View style={styles.addressFieldInfo}>
+                      <Text style={styles.fieldLabel}>From</Text>
+                      <Text style={styles.addressDisplayText} numberOfLines={1}>
+                        {currentLocation?.address || 'Loading your location...'}
+                      </Text>
+                    </View>
+                    {!loadingLocation && (
+                      <TouchableOpacity onPress={getCurrentLocation} style={styles.refreshButton}>
+                        <Feather name="refresh-cw" size={16} color="#6B7280" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              )}
+
+              {/* Journey Connector */}
+              <View style={styles.journeyConnector}>
+                <View style={styles.connectorLine} />
+              </View>
+
+              {/* Destination Address Field */}
+              <TouchableOpacity 
+                style={[styles.addressInputField, editingField === 'destination' && styles.activeField]}
+                onPress={() => switchToField('destination')}
+                activeOpacity={0.8}
+              >
+                <View style={styles.addressFieldContent}>
+                  <View style={[styles.addressDot, { backgroundColor: '#EF4444' }]} />
+                  <View style={styles.addressFieldInfo}>
+                    <Text style={styles.fieldLabel}>Where to?</Text>
+                    {editingField === 'destination' ? (
+                      <TextInput
+                        style={styles.addressInput}
+                        placeholder="Enter destination address"
+                        placeholderTextColor="#9CA3AF"
+                        value={destinationText}
+                        onChangeText={handleTextChange}
+                        autoFocus={!allowPickupEdit}
+                        returnKeyType="search"
+                        autoCorrect={false}
+                        autoCapitalize="words"
+                        blurOnSubmit={false}
+                        onSubmitEditing={() => {
+                          if (predictions.length > 0) {
+                            handlePredictionSelect(predictions[0]);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <Text style={styles.addressDisplayText} numberOfLines={1}>
+                        {destinationText || 'Tap to enter destination'}
+                      </Text>
+                    )}
+                  </View>
+                  {editingField === 'destination' && allowPickupEdit && (
+                    <TouchableOpacity 
+                      onPress={() => switchToField('pickup')} 
+                      style={styles.switchFieldButton}
+                    >
+                      <AntDesign name="up" size={16} color="#6B7280" />
+                    </TouchableOpacity>
                   )}
                 </View>
-                {!loadingLocation && (
-                  <TouchableOpacity onPress={getCurrentLocation} style={styles.refreshButton}>
-                    <Feather name="refresh-cw" size={16} color="#6B7280" />
-                  </TouchableOpacity>
-                )}
-              </View>
+              </TouchableOpacity>
             </View>
 
-            {/* Destination Input */}
-            <View style={styles.destinationSection}>
-              <View style={styles.destinationHeader}>
-                <View style={[styles.locationPin, { backgroundColor: '#EF4444' }]} />
-                <Text style={styles.destinationLabel}>Where to?</Text>
-              </View>
-              
-              <TextInput
-                style={styles.destinationInput}
-                placeholder="Enter destination address"
-                placeholderTextColor="#9CA3AF"
-                value={destinationText}
-                onChangeText={handleTextChange}
-                onSubmitEditing={handleSubmit}
-                returnKeyType="done"
-                autoCorrect={false}
-                autoCapitalize="words"
-              />
-
-              {/* Predictions Dropdown */}
-              {showPredictions && predictions.length > 0 && (
-                <View style={styles.predictionsContainer}>
+            {/* Predictions Dropdown */}
+            {(showPredictions && predictions.length > 0) || isSearching ? (
+              <View style={styles.predictionsContainer}>
+                {isSearching ? (
+                  <View style={styles.loadingContainer}>
+                    <Text style={styles.loadingText}>Searching...</Text>
+                  </View>
+                ) : (
                   <FlatList
                     data={predictions}
                     renderItem={renderPrediction}
@@ -526,29 +912,53 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
                     style={styles.predictionsList}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
+                    removeClippedSubviews={true}
+                    initialNumToRender={8}
+                    maxToRenderPerBatch={8}
+                    updateCellsBatchingPeriod={50}
+                    windowSize={10}
+                    getItemLayout={(data, index) => ({
+                      length: 60,
+                      offset: 60 * index,
+                      index,
+                    })}
+                    contentContainerStyle={styles.predictionsContent}
                   />
-                </View>
-              )}
+                )}
+              </View>
+            ) : null}
 
-              {/* API Key Warning */}
-              {!apiKey && (
-                <View style={styles.warningContainer}>
-                  <Text style={styles.warningText}>
-                    ⚠️ Google Maps not configured. Basic functionality only.
-                  </Text>
-                  <Text style={styles.warningSubtext}>
-                    Set up Google Maps API for address autocomplete and validation.
-                  </Text>
-                </View>
-              )}
+            {/* API Key Warning */}
+            {!apiKey && (
+              <View style={styles.warningContainer}>
+                <Text style={styles.warningText}>
+                  ⚠️ Google Maps not configured. Basic functionality only.
+                </Text>
+                <Text style={styles.warningSubtext}>
+                  Set up Google Maps API for address autocomplete and validation.
+                </Text>
+              </View>
+            )}
 
+            {/* Submit Button */}
+            <View style={styles.submitSection}>
               <TouchableOpacity 
-                style={[styles.submitButton, !destinationText.trim() && styles.submitButtonDisabled]}
+                style={[
+                  styles.submitButton, 
+                  ((!destinationText.trim() && editingField === 'destination') || (!pickupText.trim() && editingField === 'pickup') || (!allowPickupEdit && !currentLocation) || isSubmitting) && styles.submitButtonDisabled
+                ]}
                 onPress={handleSubmit}
-                disabled={!destinationText.trim()}
+                disabled={(!destinationText.trim() && editingField === 'destination') || (!pickupText.trim() && editingField === 'pickup') || (!allowPickupEdit && !currentLocation) || isSubmitting}
+                activeOpacity={0.8}
               >
-                <Text style={[styles.submitButtonText, !destinationText.trim() && styles.submitButtonTextDisabled]}>
-                  Set Destination
+                <Text style={[
+                  styles.submitButtonText, 
+                  ((!destinationText.trim() && editingField === 'destination') || (!pickupText.trim() && editingField === 'pickup') || (!allowPickupEdit && !currentLocation) || isSubmitting) && styles.submitButtonTextDisabled
+                ]}>
+                  {isSubmitting ? 'Processing...' : 
+                   allowPickupEdit && editingField === 'pickup' && pickupText.trim() && !destinationText.trim() ? 'Next: Enter Destination' :
+                   allowPickupEdit && (!pickupText.trim() || !destinationText.trim()) ? 'Enter Address' :
+                   'Confirm Addresses'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -568,12 +978,15 @@ const styles = StyleSheet.create({
   overlayTouchable: {
     flex: 1,
   },
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'black',
+  },
   modalContainer: {
     backgroundColor: 'white',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: screenHeight * 0.6,
-    minHeight: screenHeight * 0.3,
+    height: screenHeight * 0.6,
     paddingBottom: Platform.OS === 'ios' ? 20 : 16,
   },
   header: {
@@ -607,41 +1020,50 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  locationSection: {
+  addressFieldsContainer: {
     paddingHorizontal: 24,
-    paddingBottom: 12,
+    paddingVertical: 12,
+  },
+  addressInputField: {
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
   },
-  locationItem: {
+  addressFieldContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
   },
-  locationPin: {
+  addressDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
     marginRight: 12,
   },
-  locationContent: {
+  addressFieldInfo: {
     flex: 1,
   },
-  locationLabel: {
+  fieldLabel: {
     fontSize: 11,
     fontWeight: '500',
     color: '#6B7280',
     marginBottom: 2,
   },
-  locationText: {
+  addressInput: {
+    height: 48,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    paddingHorizontal: 16,
     fontSize: 15,
     fontWeight: '500',
     color: '#111827',
+    borderWidth: 2,
+    borderColor: '#3B82F6',
+    marginBottom: 12,
   },
-  loadingText: {
+  addressDisplayText: {
     fontSize: 15,
-    color: '#6B7280',
-    fontStyle: 'italic',
+    fontWeight: '500',
+    color: '#111827',
   },
   refreshButton: {
     width: 28,
@@ -651,40 +1073,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  destinationSection: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+  journeyConnector: {
+    marginVertical: 12,
   },
-  destinationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  destinationLabel: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#111827',
-    marginLeft: 12,
-  },
-  destinationInput: {
-    height: 48,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#111827',
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    marginBottom: 12,
+  connectorLine: {
+    height: 1,
+    backgroundColor: '#F3F4F6',
   },
   predictionsContainer: {
     marginBottom: 12,
     position: 'relative',
     zIndex: 1000,
+    height: 200,
   },
   predictionsList: {
-    maxHeight: 150,
+    flex: 1,
     backgroundColor: 'white',
     borderRadius: 16,
     shadowColor: '#000',
@@ -740,6 +1143,10 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     textAlign: 'center',
   },
+  submitSection: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
   submitButton: {
     height: 44,
     backgroundColor: '#3B82F6',
@@ -757,6 +1164,34 @@ const styles = StyleSheet.create({
   },
   submitButtonTextDisabled: {
     color: '#9CA3AF',
+  },
+  activeField: {
+    borderBottomColor: '#3B82F6',
+  },
+  switchFieldButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#F9FAFB',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  loadingText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  predictionsContent: {
+    padding: 12,
   },
 });
 
