@@ -346,6 +346,24 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
           distance: leg.distance.text,
           duration: leg.duration.text,
         });
+        
+        console.log('🔥 ROUTE STATE SET! Coordinates:', validPoints.length, 'Distance:', leg.distance.text, 'Duration:', leg.duration.text);
+        console.log('🔥 FIRST 3 ROUTE COORDINATES:', JSON.stringify(validPoints.slice(0, 3)));
+        
+        // Fit map to route after route is loaded for better visibility
+        setTimeout(() => {
+          if (mapRef.current && validPoints.length > 0) {
+            mapRef.current.fitToCoordinates(validPoints, {
+              edgePadding: {
+                top: 40,
+                right: 30,
+                bottom: 60,
+                left: 30,
+              },
+              animated: true,
+            });
+          }
+        }, 800);
       } else {
         console.log('❌ Directions API response:', data.status, data.error_message);
         setRoute(null);
@@ -408,7 +426,7 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
       // Get directions between pickup and destination
       getDirections(pickupLocation, destinationLocation);
       
-      // Fit map to show both pickup and destination
+      // Fit map to show both pickup and destination with better timing
       const coordinates = [
         {
           latitude: pickupLocation.latitude,
@@ -420,20 +438,33 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
         },
       ];
 
-      // Reduced delay for faster response
+      // Immediate fit without delay for better UX
+      if (mapRef.current) {
+        mapRef.current.fitToCoordinates(coordinates, {
+          edgePadding: {
+            top: 40,
+            right: 30,
+            bottom: 60,
+            left: 30,
+          },
+          animated: true,
+        });
+      }
+      
+      // Additional fit after a short delay to ensure markers are rendered
       setTimeout(() => {
         if (mapRef.current) {
           mapRef.current.fitToCoordinates(coordinates, {
             edgePadding: {
-              top: 60,
-              right: 60,
-              bottom: 120,
-              left: 60,
+              top: 40,
+              right: 30,
+              bottom: 60,
+              left: 30,
             },
             animated: true,
           });
         }
-      }, 200);
+      }, 500);
     } else if (pickupLocation && mapRef.current) {
       console.log('Map updating with pickup only:', pickupLocation);
       // Center on pickup location
@@ -463,16 +494,9 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
         firstPoint: route.coordinates[0],
         lastPoint: route.coordinates[route.coordinates.length - 1]
       });
-      console.log('🎨 Should be rendering route polyline with', route.coordinates.length, 'coordinates');
-      console.log('🎨 POLYLINE COORDINATES SAMPLE:', route.coordinates.slice(0, 3), '...', route.coordinates.slice(-3));
-      console.log('🎨 COORDINATE VALIDATION:', route.coordinates.every(coord => 
-        typeof coord.latitude === 'number' && 
-        typeof coord.longitude === 'number' &&
-        coord.latitude >= -90 && coord.latitude <= 90 &&
-        coord.longitude >= -180 && coord.longitude <= 180
-      ));
-      console.log('🎨 EXACT COORDINATES FOR POLYLINE:', JSON.stringify(route.coordinates.slice(0, 5)));
-      console.log('🎨 POLYLINE SHOULD BE VISIBLE NOW!');
+      console.log('🎨 POLYLINE SHOULD BE RENDERING NOW WITH', route.coordinates.length, 'COORDINATES');
+      console.log('🎨 POLYLINE STROKE: 8px #0066FF with', route.coordinates.length, 'points');
+      console.log('🎨 FIRST 5 COORDINATES:', JSON.stringify(route.coordinates.slice(0, 5)));
     } else {
       console.log('🛣️ Route cleared/null - no polyline should be visible');
     }
@@ -482,6 +506,7 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
     <View style={[styles.container, { height }]}>
       <MapView
         ref={mapRef}
+        key={`map-${route?.coordinates?.length || 0}-${pickupLocation?.latitude || 0}-${destinationLocation?.latitude || 0}`}
         style={styles.map}
         provider={PROVIDER_GOOGLE}
         initialRegion={defaultRegion}
@@ -489,16 +514,20 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
         showsMyLocationButton={false}
         showsCompass={false}
         toolbarEnabled={false}
+        customMapStyle={customMapStyle}
       >
         {/* Route Polyline - Road-following route from Google Directions */}
         {route?.coordinates && route.coordinates.length > 0 && (
           <Polyline
+            key={`route-${Date.now()}-${route.coordinates.length}`}
             coordinates={route.coordinates}
             strokeWidth={8}
             strokeColor="#0066FF"
+            lineJoin="round"
+            lineCap="round"
           />
         )}
-
+        
         {/* Pickup Location Marker */}
         {pickupLocation && (
           <Marker
@@ -547,23 +576,16 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
       {/* Enhanced Route Info Card */}
       {route && (
         <View style={styles.routeInfoCard}>
-          <View style={styles.routeInfoHeader}>
-            <View style={styles.routeActiveIndicator}>
-              <MaterialIcons name="directions" size={12} color="#FFFFFF" />
-            </View>
-            <Text style={styles.routeInfoTitle}>Route Active</Text>
-          </View>
           <View style={styles.routeInfoContent}>
             <View style={styles.routeInfoItem}>
               <View style={styles.routeIconContainer}>
-                <MaterialIcons name="directions-car" size={16} color="#FFFFFF" />
+                <MaterialIcons name="directions-car" size={12} color="#FFFFFF" />
               </View>
               <Text style={styles.routeInfoText}>{route.duration}</Text>
             </View>
-            <View style={styles.routeInfoDivider} />
             <View style={styles.routeInfoItem}>
               <View style={styles.routeIconContainer}>
-                <MaterialIcons name="straighten" size={16} color="#FFFFFF" />
+                <MaterialIcons name="straighten" size={12} color="#FFFFFF" />
               </View>
               <Text style={styles.routeInfoText}>{route.distance}</Text>
             </View>
@@ -678,61 +700,47 @@ const styles = StyleSheet.create({
   },
   routeInfoCard: {
     position: 'absolute',
-    bottom: 24,
+    top: 24,
     left: 24,
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 20,
-    padding: 16,
+    borderRadius: 12,
+    padding: 8,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 4,
+      height: 2,
     },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.8)',
   },
-  routeInfoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  routeActiveIndicator: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#2563EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  routeInfoTitle: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#111827',
-  },
   routeInfoContent: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
   },
   routeInfoItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 12,
+    justifyContent: 'flex-start',
+    marginBottom: 4,
+    width: '100%',
   },
   routeInfoText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '500',
     color: '#111827',
-    marginLeft: 8,
+    marginLeft: 6,
   },
-  routeInfoDivider: {
-    width: 1,
-    height: '100%',
-    backgroundColor: 'rgba(229, 231, 235, 0.5)',
-    marginHorizontal: 12,
+  routeIconContainer: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#3B82F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 6,
   },
   loadingCard: {
     position: 'absolute',
@@ -789,15 +797,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#111827',
-  },
-  routeIconContainer: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#3B82F6',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
   },
 });
 
