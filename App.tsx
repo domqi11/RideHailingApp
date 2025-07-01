@@ -17,6 +17,8 @@ import {
   Dimensions,
   SafeAreaView,
   StatusBar,
+  Platform,
+  Alert,
 } from 'react-native';
 import {
   AntDesign,
@@ -26,6 +28,7 @@ import {
   FontAwesome,
 } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import * as Haptics from 'expo-haptics';
 import MapViewComponent from './components/MapView';
 import ErrorBoundary from './components/ErrorBoundary';
 import SimpleLocationInput from './components/SimpleLocationInput';
@@ -47,46 +50,108 @@ export default function RideHailingApp() {
     getCurrentLocation();
   }, []);
 
+  const showLocationPermissionHelp = () => {
+    Alert.alert(
+      'Location Access Required',
+      'To provide the best ride experience, please enable location access:\n\n' +
+      '1. Go to Settings > Privacy & Security > Location Services\n' +
+      '2. Find "Expo Go" or "RideHailingApp"\n' +
+      '3. Select "While Using App"\n\n' +
+      'This helps us show your current location and find nearby drivers.',
+      [
+        {
+          text: 'Use Default Location',
+          style: 'cancel',
+          onPress: () => {
+            setPickupLocation({
+              latitude: -37.8136,
+              longitude: 144.9631,
+              address: 'Melbourne, Australia (Default)',
+            });
+          }
+        },
+        {
+          text: 'Try Again',
+          onPress: () => getCurrentLocation()
+        }
+      ]
+    );
+  };
+
   const getCurrentLocation = async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      // First check if location services are enabled
+      let { status } = await Location.getForegroundPermissionsAsync();
+      
       if (status !== 'granted') {
-        // Fallback to Melbourne if permission denied
-        setPickupLocation({
-          latitude: -37.8136,
-          longitude: 144.9631,
-          address: 'Current Location (Permission Required)',
-        });
-        return;
+        console.log('Location permission not granted, requesting...');
+        const permissionResult = await Location.requestForegroundPermissionsAsync();
+        status = permissionResult.status;
+        
+        if (status !== 'granted') {
+          console.log('Location permission denied by user');
+          showLocationPermissionHelp();
+          return;
+        }
       }
 
+      console.log('Getting current position...');
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
 
+      console.log('Location obtained:', location.coords);
+
       // Use Google's Reverse Geocoding API for better address formatting
       const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
       
-      try {
-        const response = await fetch(
-          `https://maps.googleapis.com/maps/api/geocode/json?latlng=${location.coords.latitude},${location.coords.longitude}&key=${apiKey}`
-        );
-        
-        const data = await response.json();
-        
-        if (data.status === 'OK' && data.results && data.results.length > 0) {
-          const address = data.results[0].formatted_address;
-          setPickupLocation({
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-            address: address,
-          });
-        } else {
-          throw new Error('Geocoding failed');
+      if (apiKey) {
+        try {
+          console.log('Getting address from Google Geocoding...');
+          const response = await fetch(
+            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${location.coords.latitude},${location.coords.longitude}&key=${apiKey}`
+          );
+          
+          const data = await response.json();
+          
+          if (data.status === 'OK' && data.results && data.results.length > 0) {
+            const address = data.results[0].formatted_address;
+            console.log('Address found:', address);
+            setPickupLocation({
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude,
+              address: address,
+            });
+            return;
+          } else {
+            console.log('Geocoding API returned:', data.status);
+            throw new Error('Geocoding failed');
+          }
+        } catch (geocodingError) {
+          console.log('Google Geocoding failed:', geocodingError);
+          // Fall back to basic location without formatted address
         }
-      } catch (error) {
-        console.log('Google Geocoding not available, using basic location');
-        // Fall back to basic location without formatted address
+      } else {
+        console.log('No Google API key, using device geocoding');
+      }
+
+      // Fallback: Use basic location with Expo's reverse geocoding
+      try {
+        const [address] = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+        
+        const formattedAddress = `${address.street || ''} ${address.city || ''}, ${address.region || ''} ${address.postalCode || ''}`.trim();
+        
+        setPickupLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          address: formattedAddress || 'Current Location',
+        });
+      } catch (reverseGeoError) {
+        console.log('Reverse geocoding failed:', reverseGeoError);
+        // Final fallback: Just use coordinates
         setPickupLocation({
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
@@ -95,11 +160,23 @@ export default function RideHailingApp() {
       }
     } catch (error) {
       console.error('Error getting current location:', error);
+      
+      // Provide specific error messages based on error type
+      let errorMessage = 'Melbourne, Australia (Location unavailable)';
+      
+      if (error.code === 'E_LOCATION_SERVICES_DISABLED') {
+        errorMessage = 'Melbourne, Australia (Location services disabled)';
+      } else if (error.code === 'E_LOCATION_TIMEOUT') {
+        errorMessage = 'Melbourne, Australia (Location timeout)';
+      } else if (error.message && error.message.includes('denied')) {
+        errorMessage = 'Melbourne, Australia (Location permission denied)';
+      }
+      
       // Fallback to Melbourne
       setPickupLocation({
         latitude: -37.8136,
         longitude: 144.9631,
-        address: 'Melbourne, Australia (Default)',
+        address: errorMessage,
       });
     }
   };

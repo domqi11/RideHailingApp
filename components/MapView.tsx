@@ -331,9 +331,18 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
         // Decode polyline
         const points = decodePolyline(route.overview_polyline.points);
         console.log('📍 Decoded route points:', points.length);
+        console.log('📍 First few points:', points.slice(0, 3));
+        console.log('📍 Last few points:', points.slice(-3));
+        
+        // Validate coordinate format
+        const validPoints = points.filter(point => 
+          point.latitude && point.longitude && 
+          typeof point.latitude === 'number' && typeof point.longitude === 'number'
+        );
+        console.log('✅ Valid coordinate points:', validPoints.length, 'out of', points.length);
         
         setRoute({
-          coordinates: points,
+          coordinates: validPoints, // Use validated points
           distance: leg.distance.text,
           duration: leg.duration.text,
         });
@@ -454,8 +463,18 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
         firstPoint: route.coordinates[0],
         lastPoint: route.coordinates[route.coordinates.length - 1]
       });
+      console.log('🎨 Should be rendering route polyline with', route.coordinates.length, 'coordinates');
+      console.log('🎨 POLYLINE COORDINATES SAMPLE:', route.coordinates.slice(0, 3), '...', route.coordinates.slice(-3));
+      console.log('🎨 COORDINATE VALIDATION:', route.coordinates.every(coord => 
+        typeof coord.latitude === 'number' && 
+        typeof coord.longitude === 'number' &&
+        coord.latitude >= -90 && coord.latitude <= 90 &&
+        coord.longitude >= -180 && coord.longitude <= 180
+      ));
+      console.log('🎨 EXACT COORDINATES FOR POLYLINE:', JSON.stringify(route.coordinates.slice(0, 5)));
+      console.log('🎨 POLYLINE SHOULD BE VISIBLE NOW!');
     } else {
-      console.log('🛣️ Route cleared/null');
+      console.log('🛣️ Route cleared/null - no polyline should be visible');
     }
   }, [route]);
 
@@ -470,28 +489,14 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
         showsMyLocationButton={false}
         showsCompass={false}
         toolbarEnabled={false}
-        customMapStyle={customMapStyle}
       >
-        {/* Route Polyline with enhanced styling */}
-        {route && route.coordinates.length > 0 && (
-          <>
-            {/* Shadow/outline polyline */}
-            <Polyline
-              coordinates={route.coordinates}
-              strokeWidth={8}
-              strokeColor="rgba(59, 130, 246, 0.2)"
-              lineCap="round"
-              lineJoin="round"
-            />
-            {/* Main route polyline */}
-            <Polyline
-              coordinates={route.coordinates}
-              strokeWidth={5}
-              strokeColor="#3B82F6"
-              lineCap="round"
-              lineJoin="round"
-            />
-          </>
+        {/* Route Polyline - Road-following route from Google Directions */}
+        {route?.coordinates && route.coordinates.length > 0 && (
+          <Polyline
+            coordinates={route.coordinates}
+            strokeWidth={8}
+            strokeColor="#0066FF"
+          />
         )}
 
         {/* Pickup Location Marker */}
@@ -542,6 +547,12 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
       {/* Enhanced Route Info Card */}
       {route && (
         <View style={styles.routeInfoCard}>
+          <View style={styles.routeInfoHeader}>
+            <View style={styles.routeActiveIndicator}>
+              <MaterialIcons name="directions" size={12} color="#FFFFFF" />
+            </View>
+            <Text style={styles.routeInfoTitle}>Route Active</Text>
+          </View>
           <View style={styles.routeInfoContent}>
             <View style={styles.routeInfoItem}>
               <View style={styles.routeIconContainer}>
@@ -682,6 +693,25 @@ const styles = StyleSheet.create({
     elevation: 8,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  routeInfoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  routeActiveIndicator: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#2563EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  routeInfoTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#111827',
   },
   routeInfoContent: {
     flexDirection: 'row',
