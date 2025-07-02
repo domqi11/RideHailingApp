@@ -19,6 +19,8 @@ import {
   StatusBar,
   Platform,
   Alert,
+  Modal,
+  KeyboardAvoidingView,
 } from 'react-native';
 import {
   AntDesign,
@@ -44,6 +46,7 @@ export default function RideHailingApp() {
   // Location state
   const [pickupLocation, setPickupLocation] = useState(null);
   const [destinationLocation, setDestinationLocation] = useState(null);
+  const [stops, setStops] = useState([]); // Array of stop locations
 
   // Automatically get user's current location when app loads
   useEffect(() => {
@@ -183,39 +186,73 @@ export default function RideHailingApp() {
 
   // Location handlers
   const handleLocationSelected = (pickup: any, destination: any) => {
-    console.log('Location Selected:', { pickup, destination });
-    
-    // Ensure pickup location has valid coordinates
-    if (pickup && pickup.latitude && pickup.longitude) {
-      setPickupLocation({
-        latitude: pickup.latitude,
-        longitude: pickup.longitude,
-        address: pickup.address || 'Selected Location',
-      });
+    try {
+      console.log('Location Selected:', { pickup, destination });
+      
+      // Validate and set pickup location
+      if (pickup && typeof pickup === 'object') {
+        // Ensure pickup has valid coordinates and address
+        if (typeof pickup.latitude === 'number' && 
+            typeof pickup.longitude === 'number' && 
+            !isNaN(pickup.latitude) && 
+            !isNaN(pickup.longitude) && 
+            Math.abs(pickup.latitude) <= 90 && 
+            Math.abs(pickup.longitude) <= 180) {
+          
+          setPickupLocation({
+            latitude: pickup.latitude,
+            longitude: pickup.longitude,
+            address: pickup.address || 'Selected Location',
+          });
+        } else if (pickup.address && typeof pickup.address === 'string' && pickup.address.trim()) {
+          // If no valid coordinates but has address, keep current location but update address
+          console.log('Pickup has address but invalid coordinates, keeping current location');
+        }
+      }
+      
+      // Validate and set destination location - only if destination is provided and valid
+      if (destination && typeof destination === 'object') {
+        if (typeof destination.latitude === 'number' && 
+            typeof destination.longitude === 'number' && 
+            !isNaN(destination.latitude) && 
+            !isNaN(destination.longitude) && 
+            Math.abs(destination.latitude) <= 90 && 
+            Math.abs(destination.longitude) <= 180 &&
+            destination.address && 
+            typeof destination.address === 'string' && 
+            destination.address.trim()) {
+          
+          setDestinationLocation({
+            latitude: destination.latitude,
+            longitude: destination.longitude,
+            address: destination.address.trim(),
+          });
+        } else if (destination.address && typeof destination.address === 'string' && destination.address.trim()) {
+          // If destination only has address, keep the text but don't update coordinates
+          console.log('Destination has address but no valid coordinates:', destination.address);
+        }
+      }
+      
+      // Close modal immediately for better responsiveness
+      setShowLocationModal(false);
+    } catch (error) {
+      console.error('Error in handleLocationSelected:', error);
+      // Safely close modal even if there's an error
+      setShowLocationModal(false);
+      Alert.alert('Error', 'Failed to process location data. Please try again.');
     }
-    
-    // Only set destination if it has valid coordinates
-    if (destination && destination.latitude && destination.longitude) {
-      setDestinationLocation({
-        latitude: destination.latitude,
-        longitude: destination.longitude,
-        address: destination.address || 'Selected Destination',
-      });
-    } else if (destination && destination.address && !destination.latitude) {
-      // If destination only has address, keep the text but don't update coordinates
-      // This allows the UI to show the selected text while keeping map unchanged
-      console.log('Destination has address but no coordinates:', destination.address);
-    }
-    
-    // Close modal immediately for better responsiveness
-    setShowLocationModal(false);
   };
 
   const handleLocationModalClose = () => {
-    // Use setTimeout to schedule the state update properly
-    setTimeout(() => {
+    try {
+      // Use setTimeout to schedule the state update properly and prevent race conditions
+      setTimeout(() => {
+        setShowLocationModal(false);
+      }, 0);
+    } catch (error) {
+      // Fallback: Force close modal
       setShowLocationModal(false);
-    }, 0);
+    }
   };
 
   const handleSeePrices = () => {
@@ -276,6 +313,47 @@ export default function RideHailingApp() {
     setSelectedRide(null);
   };
 
+  // Stop management handlers
+  const handleAddStop = () => {
+    console.log('🛑 Add stop button pressed - opening location modal');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setShowLocationModal(true);
+  };
+
+  const handleRemoveStop = (stopId) => {
+    console.log('🗑️ Removing stop from main app:', stopId);
+    try {
+      const updatedStops = stops.filter(stop => stop.id !== stopId)
+        .map((stop, index) => ({ ...stop, order: index + 1 }));
+      setStops(updatedStops);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } catch (error) {
+      console.error('❌ Error removing stop:', error);
+      Alert.alert('Error', 'Failed to remove stop. Please try again.');
+    }
+  };
+
+  const handleReorderStops = (fromIndex, toIndex) => {
+    console.log('🔄 Reordering stops:', { fromIndex, toIndex });
+    try {
+      const reorderedStops = [...stops];
+      const [movedStop] = reorderedStops.splice(fromIndex, 1);
+      reorderedStops.splice(toIndex, 0, movedStop);
+      
+      // Update order numbers
+      const updatedStops = reorderedStops.map((stop, index) => ({
+        ...stop,
+        order: index + 1,
+      }));
+      
+      setStops(updatedStops);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      console.error('❌ Error reordering stops:', error);
+      Alert.alert('Error', 'Failed to reorder stops. Please try again.');
+    }
+  };
+
   const rideOptions = [
     {
       id: 'economy',
@@ -321,9 +399,10 @@ export default function RideHailingApp() {
       <View style={styles.mapContainer}>
         {pickupLocation ? (
           <MapViewComponent
-            key={`${pickupLocation.latitude}-${pickupLocation.longitude}-${destinationLocation?.latitude || 'none'}-${destinationLocation?.longitude || 'none'}`}
+            key={`${pickupLocation.latitude}-${pickupLocation.longitude}-${destinationLocation?.latitude || 'none'}-${destinationLocation?.longitude || 'none'}-${stops.length}`}
             pickupLocation={pickupLocation}
             destinationLocation={destinationLocation}
+            stops={stops}
           />
         ) : (
           <View style={styles.loadingMapContainer}>
@@ -355,13 +434,51 @@ export default function RideHailingApp() {
             </View>
           </TouchableOpacity>
 
-          {/* Journey Line Connector */}
-          <View style={styles.journeyConnector}>
-            <View style={styles.connectorLine} />
-            <View style={styles.connectorIcon}>
-              <MaterialIcons name="swap-vert" size={14} color="#FFFFFF" />
+          {/* Journey Line Connector (only if no stops) */}
+          {stops.length === 0 && (
+            <View style={styles.journeyConnector}>
+              <View style={styles.connectorLine} />
+              <View style={styles.connectorIcon}>
+                <MaterialIcons name="swap-vert" size={14} color="#FFFFFF" />
+              </View>
             </View>
-          </View>
+          )}
+
+          {/* Stops */}
+          {stops.filter(stop => 
+            stop && 
+            stop.id && 
+            stop.address && 
+            typeof stop.address === 'string' && 
+            stop.address.trim()
+          ).map((stop, index) => (
+            <View key={stop.id}>
+              <View style={styles.stopField}>
+                <View style={styles.addressFieldContent}>
+                  <View style={styles.stopDot}>
+                    <Text style={styles.stopNumber}>{index + 1}</Text>
+                  </View>
+                  <View style={styles.addressTextContainer}>
+                    <Text style={styles.addressLabel}>Stop {index + 1}</Text>
+                    <Text style={styles.addressText} numberOfLines={1}>
+                      {stop.address}
+                    </Text>
+                  </View>
+                  <TouchableOpacity 
+                    onPress={() => handleRemoveStop(stop.id)} 
+                    style={styles.removeStopButton}
+                  >
+                    <AntDesign name="close" size={16} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              {/* Connector after each stop */}
+              <View style={styles.journeyConnector}>
+                <View style={styles.connectorLine} />
+              </View>
+            </View>
+          ))}
 
           {/* Where To Field */}
           <TouchableOpacity 
@@ -407,7 +524,7 @@ export default function RideHailingApp() {
           <Text style={styles.quickActionText}>Favorites</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.quickActionButton}>
+        <TouchableOpacity style={styles.quickActionButton} onPress={handleAddStop}>
           <View style={styles.quickActionIcon}>
             <AntDesign name="plus" size={16} color="white" />
           </View>
@@ -433,6 +550,8 @@ export default function RideHailingApp() {
         currentDestination={destinationLocation?.address}
         currentPickup={pickupLocation?.address}
         allowPickupEdit={true}
+        stops={stops}
+        onStopsUpdated={setStops}
       />
     </ScrollView>
   );
@@ -457,6 +576,25 @@ export default function RideHailingApp() {
           <View style={[styles.locationPin, { backgroundColor: '#3B82F6' }]} />
           <Text style={styles.tripLocationText}>{pickupLocation.address}</Text>
         </View>
+        
+        {/* Display stops */}
+        {stops.filter(stop => 
+          stop && 
+          stop.id && 
+          stop.address && 
+          typeof stop.address === 'string' && 
+          stop.address.trim()
+        ).map((stop, index) => (
+          <View key={stop.id} style={styles.tripLocation}>
+            <View style={[styles.locationPin, { backgroundColor: '#3B82F6' }]}>
+              <Text style={styles.stopPinText}>{index + 1}</Text>
+            </View>
+            <Text style={styles.tripLocationText} numberOfLines={1}>
+              Stop {index + 1}: {stop.address}
+            </Text>
+          </View>
+        ))}
+        
         <View style={styles.tripLocation}>
           <View style={[styles.locationPin, { backgroundColor: '#EF4444' }]} />
           <Text style={styles.tripLocationText}>
@@ -1588,5 +1726,35 @@ const styles = StyleSheet.create({
     height: 16,
     borderRadius: 8,
     position: 'absolute',
+  },
+  stopField: {
+    marginBottom: 12,
+  },
+  stopDot: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#3B82F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  stopNumber: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+  },
+  removeStopButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#EF4444',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stopPinText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
   },
 });

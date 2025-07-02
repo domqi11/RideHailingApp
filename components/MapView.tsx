@@ -18,6 +18,12 @@ interface MapViewComponentProps {
   };
   showUserLocation?: boolean;
   height?: number;
+  stops?: Array<{
+    id: string;
+    latitude: number;
+    longitude: number;
+    address?: string;
+  }>;
 }
 
 interface RouteInfo {
@@ -31,6 +37,7 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
   destinationLocation,
   showUserLocation = true,
   height = 320,
+  stops = [],
 }) => {
   const mapRef = useRef<MapView>(null);
   const [route, setRoute] = useState<RouteInfo | null>(null);
@@ -296,80 +303,72 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
     }
   ];
 
-  const getDirections = async (origin: any, destination: any) => {
-    if (!apiKey) {
-      console.log('No API key available for directions');
+  const getDirections = async (origin: any, destination: any, waypoints: any[] = []) => {
+    if (!apiKey || !origin || !destination) {
       return;
     }
 
-    console.log('🗺️ Fetching directions from:', origin.address, 'to:', destination.address);
-
     try {
       setIsLoadingRoute(true);
-      const originString = `${origin.latitude},${origin.longitude}`;
-      const destinationString = `${destination.latitude},${destination.longitude}`;
       
-      console.log('📍 Coordinates:', { originString, destinationString });
-      
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/directions/json?origin=${originString}&destination=${destinationString}&key=${apiKey}&mode=driving`
+      // Validate and filter waypoints to only include valid stops
+      const validWaypoints = waypoints.filter(waypoint => 
+        waypoint && 
+        typeof waypoint.latitude === 'number' && 
+        typeof waypoint.longitude === 'number' &&
+        waypoint.latitude !== 0 && 
+        waypoint.longitude !== 0 &&
+        !isNaN(waypoint.latitude) && 
+        !isNaN(waypoint.longitude) &&
+        Math.abs(waypoint.latitude) <= 90 && 
+        Math.abs(waypoint.longitude) <= 180
       );
-      
+
+      // Build waypoints string for API
+      let waypointsString = '';
+      if (validWaypoints.length > 0) {
+        waypointsString = `&waypoints=${validWaypoints.map(w => `${w.latitude},${w.longitude}`).join('|')}`;
+      }
+
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}${waypointsString}&key=${apiKey}&mode=driving&alternatives=false&units=metric`
+      );
+
       const data = await response.json();
-      console.log('🚗 Directions API Response Status:', data.status);
-      
+
       if (data.status === 'OK' && data.routes && data.routes.length > 0) {
         const route = data.routes[0];
         const leg = route.legs[0];
         
-        console.log('✅ Route found:', {
-          distance: leg.distance.text,
-          duration: leg.duration.text,
-          polylinePoints: route.overview_polyline.points.length
+        // Calculate total distance and duration for multi-leg routes
+        let totalDistance = 0;
+        let totalDuration = 0;
+        
+        route.legs.forEach((leg: any) => {
+          totalDistance += leg.distance.value;
+          totalDuration += leg.duration.value;
         });
+
+        // Convert to readable format
+        const distanceText = totalDistance >= 1000 
+          ? `${(totalDistance / 1000).toFixed(1)} km`
+          : `${totalDistance} m`;
         
-        // Decode polyline
-        const points = decodePolyline(route.overview_polyline.points);
-        console.log('📍 Decoded route points:', points.length);
-        console.log('📍 First few points:', points.slice(0, 3));
-        console.log('📍 Last few points:', points.slice(-3));
-        
-        // Validate coordinate format
-        const validPoints = points.filter(point => 
-          point.latitude && point.longitude && 
-          typeof point.latitude === 'number' && typeof point.longitude === 'number'
-        );
-        console.log('✅ Valid coordinate points:', validPoints.length, 'out of', points.length);
-        
+        const durationText = totalDuration >= 3600
+          ? `${Math.floor(totalDuration / 3600)}h ${Math.floor((totalDuration % 3600) / 60)}m`
+          : `${Math.floor(totalDuration / 60)} min`;
+
+        const routeCoordinates = decodePolyline(route.overview_polyline.points);
+
         setRoute({
-          coordinates: validPoints, // Use validated points
-          distance: leg.distance.text,
-          duration: leg.duration.text,
+          coordinates: routeCoordinates,
+          distance: distanceText,
+          duration: durationText,
         });
-        
-        console.log('🔥 ROUTE STATE SET! Coordinates:', validPoints.length, 'Distance:', leg.distance.text, 'Duration:', leg.duration.text);
-        console.log('🔥 FIRST 3 ROUTE COORDINATES:', JSON.stringify(validPoints.slice(0, 3)));
-        
-        // Fit map to route after route is loaded for better visibility
-        setTimeout(() => {
-          if (mapRef.current && validPoints.length > 0) {
-            mapRef.current.fitToCoordinates(validPoints, {
-              edgePadding: {
-                top: 80,  // Increased to clear route info card
-                right: 150, // Increased to clear route info card in top-right
-                bottom: 80,
-                left: 40,
-              },
-              animated: true,
-            });
-          }
-        }, 800);
       } else {
-        console.log('❌ Directions API response:', data.status, data.error_message);
         setRoute(null);
       }
     } catch (error) {
-      console.log('❌ Error getting directions:', error);
       setRoute(null);
     } finally {
       setIsLoadingRoute(false);
@@ -421,17 +420,42 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
 
   useEffect(() => {
     if (pickupLocation && destinationLocation && mapRef.current) {
-      console.log('Map updating with both locations:', { pickupLocation, destinationLocation });
+      // Filter out invalid stops before using them with additional safety checks
+      const validStops = stops.filter(stop => {
+        try {
+          return (
+            stop && 
+            stop.id && 
+            typeof stop.latitude === 'number' && 
+            typeof stop.longitude === 'number' &&
+            stop.latitude !== 0 && 
+            stop.longitude !== 0 &&
+            !isNaN(stop.latitude) && 
+            !isNaN(stop.longitude) &&
+            Math.abs(stop.latitude) <= 90 && 
+            Math.abs(stop.longitude) <= 180 &&
+            isFinite(stop.latitude) &&
+            isFinite(stop.longitude)
+          );
+        } catch (error) {
+          // If any error occurs checking a stop, exclude it
+          return false;
+        }
+      });
       
-      // Get directions between pickup and destination
-      getDirections(pickupLocation, destinationLocation);
+      // Get directions with waypoints if valid stops exist
+      getDirections(pickupLocation, destinationLocation, validStops);
       
-      // Fit map to show both pickup and destination with better timing
-      const coordinates = [
+      // Fit map to show all locations (pickup, valid stops, destination)
+      const allCoordinates = [
         {
           latitude: pickupLocation.latitude,
           longitude: pickupLocation.longitude,
         },
+        ...validStops.map(stop => ({
+          latitude: stop.latitude,
+          longitude: stop.longitude,
+        })),
         {
           latitude: destinationLocation.latitude,
           longitude: destinationLocation.longitude,
@@ -440,10 +464,10 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
 
       // Immediate fit without delay for better UX
       if (mapRef.current) {
-        mapRef.current.fitToCoordinates(coordinates, {
+        mapRef.current.fitToCoordinates(allCoordinates, {
           edgePadding: {
-            top: 80,  // Increased to clear route info card
-            right: 150, // Increased to clear route info card in top-right
+            top: 80,
+            right: 150,
             bottom: 80,
             left: 40,
           },
@@ -454,10 +478,10 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
       // Additional fit after a short delay to ensure markers are rendered
       setTimeout(() => {
         if (mapRef.current) {
-          mapRef.current.fitToCoordinates(coordinates, {
+          mapRef.current.fitToCoordinates(allCoordinates, {
             edgePadding: {
-              top: 80,  // Increased to clear route info card
-              right: 150, // Increased to clear route info card in top-right
+              top: 80,
+              right: 150,
               bottom: 80,
               left: 40,
             },
@@ -466,7 +490,6 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
         }
       }, 500);
     } else if (pickupLocation && mapRef.current) {
-      console.log('Map updating with pickup only:', pickupLocation);
       // Center on pickup location
       setRoute(null);
       setTimeout(() => {
@@ -482,7 +505,7 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
     } else {
       setRoute(null);
     }
-  }, [pickupLocation, destinationLocation]);
+  }, [pickupLocation, destinationLocation, stops]);
 
   // Monitor route state changes
   useEffect(() => {
@@ -572,6 +595,38 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
             </View>
           </Marker>
         )}
+
+        {/* Stop Markers */}
+        {stops.filter(stop => 
+          stop && 
+          stop.id && 
+          typeof stop.latitude === 'number' && 
+          typeof stop.longitude === 'number' &&
+          stop.latitude !== 0 && 
+          stop.longitude !== 0 &&
+          !isNaN(stop.latitude) && 
+          !isNaN(stop.longitude) &&
+          Math.abs(stop.latitude) <= 90 && 
+          Math.abs(stop.longitude) <= 180
+        ).map((stop, index) => (
+          <Marker
+            key={stop.id}
+            coordinate={{
+              latitude: stop.latitude,
+              longitude: stop.longitude,
+            }}
+            title={`Stop ${index + 1}`}
+            description={stop.address || 'Stop location'}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <View style={styles.stopMarkerContainer}>
+              <View style={styles.stopMarker}>
+                <Text style={styles.stopMarkerText}>{index + 1}</Text>
+              </View>
+              <View style={styles.stopMarkerShadow} />
+            </View>
+          </Marker>
+        ))}
       </MapView>
 
       {/* Enhanced Route Info Card */}
@@ -799,6 +854,33 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#111827',
+  },
+  stopMarkerContainer: {
+    position: 'relative',
+  },
+  stopMarker: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'white',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#F59E0B',
+  },
+  stopMarkerText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#F59E0B',
+  },
+  stopMarkerShadow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
   },
 });
 
