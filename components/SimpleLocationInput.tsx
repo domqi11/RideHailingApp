@@ -59,6 +59,16 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
   const [isSearching, setIsSearching] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
+  // Animation states for confirmation
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
+  const buttonScaleAnim = useRef(new Animated.Value(1)).current;
+  const buttonOpacityAnim = useRef(new Animated.Value(1)).current;
+  const successScaleAnim = useRef(new Animated.Value(0)).current;
+  const successOpacityAnim = useRef(new Animated.Value(0)).current;
+  const checkmarkAnim = useRef(new Animated.Value(0)).current;
+  const spinAnim = useRef(new Animated.Value(0)).current;
+
   // Refs for better performance
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isClosingRef = useRef(false);
@@ -547,6 +557,40 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
       return;
     }
 
+    // Start confirmation animation
+    setIsConfirming(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    // Button press animation
+    Animated.sequence([
+      Animated.parallel([
+        Animated.spring(buttonScaleAnim, {
+          toValue: 0.95,
+          useNativeDriver: true,
+          tension: 300,
+          friction: 10,
+        }),
+        Animated.timing(buttonOpacityAnim, {
+          toValue: 0.8,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.parallel([
+        Animated.spring(buttonScaleAnim, {
+          toValue: 1,
+          useNativeDriver: true,
+          tension: 300,
+          friction: 10,
+        }),
+        Animated.timing(buttonOpacityAnim, {
+          toValue: 1,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+
     const currentText = editingField === 'pickup' ? pickupText : destinationText;
     setIsSubmitting(true);
 
@@ -558,6 +602,7 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
         );
         if (exactMatch) {
           await handlePredictionSelect(exactMatch);
+          await showSuccessAnimationAndClose();
           return;
         }
       }
@@ -611,34 +656,100 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
                 // Switch to destination field instead of closing
                 onLocationSelected(pickup, destination);
                 setEditingField('destination');
+                setIsConfirming(false);
                 return;
               } else {
                 destination = geocodedLocation;
                 // Use pickup text for pickup
                 pickup = pickupText.trim() ? { address: pickupText } : currentLocation;
                 onLocationSelected(pickup, destination);
-                handleClose();
+                await showSuccessAnimationAndClose();
               }
             } else {
               // Original behavior for destination only
               onLocationSelected(currentLocation, geocodedLocation);
-              handleClose();
+              await showSuccessAnimationAndClose();
             }
           } else {
             console.log('Geocoding response:', data.status, data.error_message);
+            setIsConfirming(false);
             Alert.alert('Address Not Found', 'Could not find this address. Please try a different address or check your spelling.');
           }
         } catch (error) {
           console.log('Geocoding not available:', error.message);
+          setIsConfirming(false);
           handleBasicSubmit();
         }
       } else {
+        setIsConfirming(false);
         handleBasicSubmit();
       }
     } finally {
       setIsSubmitting(false);
     }
   }, [editingField, pickupText, destinationText, allowPickupEdit, predictions, apiKey, currentLocation, handlePredictionSelect, onLocationSelected]);
+
+  const showSuccessAnimationAndClose = useCallback(async () => {
+    return new Promise<void>((resolve) => {
+      setShowSuccessAnimation(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // Success animation sequence
+      Animated.sequence([
+        // Show success checkmark
+        Animated.parallel([
+          Animated.spring(successScaleAnim, {
+            toValue: 1,
+            useNativeDriver: true,
+            tension: 200,
+            friction: 6,
+          }),
+          Animated.timing(successOpacityAnim, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ]),
+        // Animate checkmark drawing
+        Animated.timing(checkmarkAnim, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+        // Hold for a moment
+        Animated.delay(400),
+        // Fade out and close
+        Animated.parallel([
+          Animated.timing(successOpacityAnim, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+          Animated.spring(slideAnim, {
+            toValue: screenHeight,
+            useNativeDriver: true,
+            tension: 150,
+            friction: 12,
+            overshootClamping: true,
+            restDisplacementThreshold: 0.5,
+            restSpeedThreshold: 0.5,
+          }),
+        ]),
+      ]).start(() => {
+        // Reset all animation states
+        setIsConfirming(false);
+        setShowSuccessAnimation(false);
+        successScaleAnim.setValue(0);
+        successOpacityAnim.setValue(0);
+        checkmarkAnim.setValue(0);
+        buttonScaleAnim.setValue(1);
+        buttonOpacityAnim.setValue(1);
+        
+        onClose();
+        resolve();
+      });
+    });
+  }, [onClose]);
 
   const handleBasicSubmit = () => {
     Alert.alert(
@@ -723,6 +834,26 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
     </TouchableOpacity>
   ), [handlePredictionSelect]);
 
+  // Start spinner animation when confirming
+  useEffect(() => {
+    if (isConfirming) {
+      const spinAnimation = Animated.loop(
+        Animated.timing(spinAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        { iterations: -1 }
+      );
+      spinAnimation.start();
+      
+      return () => {
+        spinAnimation.stop();
+        spinAnim.setValue(0);
+      };
+    }
+  }, [isConfirming]);
+
   return (
     <Modal
       visible={visible}
@@ -781,38 +912,32 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
             <View style={styles.addressFieldsContainer}>
               {/* Pickup Address Field */}
               {allowPickupEdit && (
-                <TouchableOpacity 
-                  style={[styles.addressInputField, editingField === 'pickup' && styles.activeField]}
-                  onPress={() => switchToField('pickup')}
-                  activeOpacity={0.8}
-                >
+                <View style={[styles.addressInputField, editingField === 'pickup' && styles.activeField]}>
                   <View style={styles.addressFieldContent}>
                     <View style={[styles.addressDot, { backgroundColor: '#3B82F6' }]} />
                     <View style={styles.addressFieldInfo}>
                       <Text style={styles.fieldLabel}>From</Text>
-                      {editingField === 'pickup' ? (
-                        <TextInput
-                          style={styles.addressInput}
-                          placeholder="Enter pickup address"
-                          placeholderTextColor="#9CA3AF"
-                          value={pickupText}
-                          onChangeText={handleTextChange}
-                          autoFocus
-                          returnKeyType="search"
-                          autoCorrect={false}
-                          autoCapitalize="words"
-                          blurOnSubmit={false}
-                          onSubmitEditing={() => {
-                            if (predictions.length > 0) {
-                              handlePredictionSelect(predictions[0]);
-                            }
-                          }}
-                        />
-                      ) : (
-                        <Text style={styles.addressDisplayText} numberOfLines={1}>
-                          {pickupText || currentLocation?.address || 'Loading...'}
-                        </Text>
-                      )}
+                      <TextInput
+                        style={[
+                          styles.addressInput,
+                          editingField !== 'pickup' && styles.inactiveAddressInput
+                        ]}
+                        placeholder={pickupText ? pickupText : (currentLocation?.address || "Tap to enter pickup")}
+                        placeholderTextColor={editingField === 'pickup' ? "#9CA3AF" : "#111827"}
+                        value={editingField === 'pickup' ? pickupText : ''}
+                        onChangeText={handleTextChange}
+                        onFocus={() => switchToField('pickup')}
+                        returnKeyType="search"
+                        autoCorrect={false}
+                        autoCapitalize="words"
+                        blurOnSubmit={false}
+                        editable={true}
+                        onSubmitEditing={() => {
+                          if (predictions.length > 0) {
+                            handlePredictionSelect(predictions[0]);
+                          }
+                        }}
+                      />
                     </View>
                     {editingField === 'pickup' && (
                       <TouchableOpacity 
@@ -823,7 +948,7 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
                       </TouchableOpacity>
                     )}
                   </View>
-                </TouchableOpacity>
+                </View>
               )}
 
               {/* Static Pickup Display (when not editable) */}
@@ -852,38 +977,33 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
               </View>
 
               {/* Destination Address Field */}
-              <TouchableOpacity 
-                style={[styles.addressInputField, editingField === 'destination' && styles.activeField]}
-                onPress={() => switchToField('destination')}
-                activeOpacity={0.8}
-              >
+              <View style={[styles.addressInputField, editingField === 'destination' && styles.activeField]}>
                 <View style={styles.addressFieldContent}>
                   <View style={[styles.addressDot, { backgroundColor: '#EF4444' }]} />
                   <View style={styles.addressFieldInfo}>
                     <Text style={styles.fieldLabel}>Where to?</Text>
-                    {editingField === 'destination' ? (
-                      <TextInput
-                        style={styles.addressInput}
-                        placeholder="Enter destination address"
-                        placeholderTextColor="#9CA3AF"
-                        value={destinationText}
-                        onChangeText={handleTextChange}
-                        autoFocus={!allowPickupEdit}
-                        returnKeyType="search"
-                        autoCorrect={false}
-                        autoCapitalize="words"
-                        blurOnSubmit={false}
-                        onSubmitEditing={() => {
-                          if (predictions.length > 0) {
-                            handlePredictionSelect(predictions[0]);
-                          }
-                        }}
-                      />
-                    ) : (
-                      <Text style={styles.addressDisplayText} numberOfLines={1}>
-                        {destinationText || 'Tap to enter destination'}
-                      </Text>
-                    )}
+                    <TextInput
+                      style={[
+                        styles.addressInput,
+                        editingField !== 'destination' && styles.inactiveAddressInput
+                      ]}
+                      placeholder={destinationText || "Tap to enter destination"}
+                      placeholderTextColor={editingField === 'destination' ? "#9CA3AF" : "#111827"}
+                      value={editingField === 'destination' ? destinationText : ''}
+                      onChangeText={handleTextChange}
+                      onFocus={() => switchToField('destination')}
+                      autoFocus={!allowPickupEdit && editingField === 'destination'}
+                      returnKeyType="search"
+                      autoCorrect={false}
+                      autoCapitalize="words"
+                      blurOnSubmit={false}
+                      editable={true}
+                      onSubmitEditing={() => {
+                        if (predictions.length > 0) {
+                          handlePredictionSelect(predictions[0]);
+                        }
+                      }}
+                    />
                   </View>
                   {editingField === 'destination' && allowPickupEdit && (
                     <TouchableOpacity 
@@ -894,7 +1014,7 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
                     </TouchableOpacity>
                   )}
                 </View>
-              </TouchableOpacity>
+              </View>
             </View>
 
             {/* Predictions Dropdown */}
@@ -945,23 +1065,82 @@ const SimpleLocationInput: React.FC<SimpleLocationInputProps> = ({
               <TouchableOpacity 
                 style={[
                   styles.submitButton, 
-                  ((!destinationText.trim() && editingField === 'destination') || (!pickupText.trim() && editingField === 'pickup') || (!allowPickupEdit && !currentLocation) || isSubmitting) && styles.submitButtonDisabled
+                  ((!destinationText.trim() && editingField === 'destination') || (!pickupText.trim() && editingField === 'pickup') || (!allowPickupEdit && !currentLocation) || isSubmitting || isConfirming) && styles.submitButtonDisabled,
+                  { 
+                    transform: [{ scale: buttonScaleAnim }],
+                    opacity: buttonOpacityAnim,
+                  }
                 ]}
                 onPress={handleSubmit}
-                disabled={(!destinationText.trim() && editingField === 'destination') || (!pickupText.trim() && editingField === 'pickup') || (!allowPickupEdit && !currentLocation) || isSubmitting}
-                activeOpacity={0.8}
+                disabled={(!destinationText.trim() && editingField === 'destination') || (!pickupText.trim() && editingField === 'pickup') || (!allowPickupEdit && !currentLocation) || isSubmitting || isConfirming}
+                activeOpacity={0.9}
               >
-                <Text style={[
-                  styles.submitButtonText, 
-                  ((!destinationText.trim() && editingField === 'destination') || (!pickupText.trim() && editingField === 'pickup') || (!allowPickupEdit && !currentLocation) || isSubmitting) && styles.submitButtonTextDisabled
-                ]}>
-                  {isSubmitting ? 'Processing...' : 
-                   allowPickupEdit && editingField === 'pickup' && pickupText.trim() && !destinationText.trim() ? 'Next: Enter Destination' :
-                   allowPickupEdit && (!pickupText.trim() || !destinationText.trim()) ? 'Enter Address' :
-                   'Confirm Addresses'}
-                </Text>
+                {isConfirming && !showSuccessAnimation ? (
+                  <View style={styles.confirmingContent}>
+                    <Animated.View 
+                      style={[
+                        styles.loadingSpinner,
+                        {
+                          transform: [
+                            {
+                              rotate: spinAnim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: ['0deg', '360deg'],
+                              }),
+                            },
+                          ],
+                        }
+                      ]}
+                    />
+                    <Text style={styles.confirmingText}>Confirming...</Text>
+                  </View>
+                ) : (
+                  <Text style={[
+                    styles.submitButtonText, 
+                    ((!destinationText.trim() && editingField === 'destination') || (!pickupText.trim() && editingField === 'pickup') || (!allowPickupEdit && !currentLocation) || isSubmitting || isConfirming) && styles.submitButtonTextDisabled
+                  ]}>
+                    {isSubmitting && !isConfirming ? 'Processing...' : 
+                     allowPickupEdit && editingField === 'pickup' && pickupText.trim() && !destinationText.trim() ? 'Next: Enter Destination' :
+                     allowPickupEdit && (!pickupText.trim() || !destinationText.trim()) ? 'Enter Address' :
+                     'Confirm Addresses'}
+                  </Text>
+                )}
               </TouchableOpacity>
             </View>
+
+            {/* Success Animation Overlay */}
+            {showSuccessAnimation && (
+              <Animated.View 
+                style={[
+                  styles.successOverlay,
+                  {
+                    opacity: successOpacityAnim,
+                    transform: [{ scale: successScaleAnim }],
+                  }
+                ]}
+              >
+                <View style={styles.successContainer}>
+                  <Animated.View 
+                    style={[
+                      styles.successCheckmark,
+                      {
+                        transform: [
+                          {
+                            scale: checkmarkAnim.interpolate({
+                              inputRange: [0, 0.5, 1],
+                              outputRange: [0, 1.2, 1],
+                            }),
+                          },
+                        ],
+                      }
+                    ]}
+                  >
+                    <AntDesign name="check" size={32} color="#FFFFFF" />
+                  </Animated.View>
+                  <Text style={styles.successText}>Addresses Confirmed!</Text>
+                </View>
+              </Animated.View>
+            )}
           </Animated.View>
         </View>
       </KeyboardAvoidingView>
@@ -1059,6 +1238,17 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#3B82F6',
     marginBottom: 12,
+  },
+  inactiveAddressInput: {
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#111827',
+    marginBottom: 0,
+    height: 'auto',
+    paddingHorizontal: 0,
+    paddingVertical: 4,
   },
   addressDisplayText: {
     fontSize: 15,
@@ -1192,6 +1382,73 @@ const styles = StyleSheet.create({
   },
   predictionsContent: {
     padding: 12,
+  },
+  confirmingContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingSpinner: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    borderTopColor: 'transparent',
+    marginRight: 10,
+  },
+  confirmingText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#FFFFFF',
+  },
+  successOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  successContainer: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 16,
+  },
+  successCheckmark: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#10B981',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    shadowColor: '#10B981',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  successText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111827',
+    textAlign: 'center',
   },
 });
 

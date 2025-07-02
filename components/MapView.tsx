@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { View, StyleSheet, Dimensions, Text } from 'react-native';
+import { View, StyleSheet, Dimensions, Text, Animated } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { AntDesign, MaterialIcons } from '@expo/vector-icons';
 
@@ -355,10 +355,10 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
           if (mapRef.current && validPoints.length > 0) {
             mapRef.current.fitToCoordinates(validPoints, {
               edgePadding: {
-                top: 40,
-                right: 30,
-                bottom: 60,
-                left: 30,
+                top: 80,  // Increased to clear route info card
+                right: 150, // Increased to clear route info card in top-right
+                bottom: 80,
+                left: 40,
               },
               animated: true,
             });
@@ -442,10 +442,10 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
       if (mapRef.current) {
         mapRef.current.fitToCoordinates(coordinates, {
           edgePadding: {
-            top: 40,
-            right: 30,
-            bottom: 60,
-            left: 30,
+            top: 80,  // Increased to clear route info card
+            right: 150, // Increased to clear route info card in top-right
+            bottom: 80,
+            left: 40,
           },
           animated: true,
         });
@@ -456,10 +456,10 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
         if (mapRef.current) {
           mapRef.current.fitToCoordinates(coordinates, {
             edgePadding: {
-              top: 40,
-              right: 30,
-              bottom: 60,
-              left: 30,
+              top: 80,  // Increased to clear route info card
+              right: 150, // Increased to clear route info card in top-right
+              bottom: 80,
+              left: 40,
             },
             animated: true,
           });
@@ -516,15 +516,16 @@ const MapViewComponent: React.FC<MapViewComponentProps> = ({
         toolbarEnabled={false}
         customMapStyle={customMapStyle}
       >
-        {/* Route Polyline - Road-following route from Google Directions */}
+        {/* Route Polyline - Immediate display without animation */}
         {route?.coordinates && route.coordinates.length > 0 && (
           <Polyline
-            key={`route-${Date.now()}-${route.coordinates.length}`}
+            key={`route-${route.coordinates.length}`}
             coordinates={route.coordinates}
             strokeWidth={8}
             strokeColor="#0066FF"
             lineJoin="round"
             lineCap="round"
+            geodesic={true}
           />
         )}
         
@@ -700,11 +701,11 @@ const styles = StyleSheet.create({
   },
   routeInfoCard: {
     position: 'absolute',
-    top: 24,
-    left: 24,
+    top: 16,      // Moved closer to top edge
+    right: 16,    // Moved to right side instead of left
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderRadius: 12,
-    padding: 8,
+    padding: 10,   // Slightly increased padding
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -715,6 +716,7 @@ const styles = StyleSheet.create({
     elevation: 4,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.8)',
+    minWidth: 120,  // Ensure consistent width
   },
   routeInfoContent: {
     flexDirection: 'column',
