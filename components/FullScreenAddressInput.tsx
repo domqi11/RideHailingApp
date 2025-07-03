@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Modal,
-  Animated,
   Dimensions,
   TextInput,
   FlatList,
@@ -47,7 +46,6 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
   initialValue = '',
   placeholder = 'Enter address or landmark...',
 }) => {
-  const [slideAnim] = useState(new Animated.Value(screenHeight));
   const [addressText, setAddressText] = useState(initialValue);
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -68,30 +66,21 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
 
   useEffect(() => {
     isMountedRef.current = true;
-
+    
     if (visible) {
+      console.log('🔍 FullScreen input opening:', { fieldType, fieldLabel });
       setAddressText(initialValue);
       
-      // Slide in animation
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 100,
-        friction: 8,
-      }).start(() => {
-        // Auto-focus the input after animation
+      // Focus the input with multiple attempts
+      const focusAttempts = [100, 300, 500, 1000];
+      focusAttempts.forEach((delay, index) => {
         setTimeout(() => {
-          inputRef.current?.focus();
-        }, 100);
+          console.log(`🔍 Focus attempt ${index + 1} at ${delay}ms`);
+          if (isMountedRef.current && inputRef.current) {
+            inputRef.current.focus();
+          }
+        }, delay);
       });
-    } else {
-      // Slide out animation
-      Animated.spring(slideAnim, {
-        toValue: screenHeight,
-        useNativeDriver: true,
-        tension: 120,
-        friction: 8,
-      }).start();
     }
 
     return () => {
@@ -165,6 +154,7 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
   };
 
   const handleTextChange = useCallback((text: string) => {
+    console.log('🔍 Text changed:', { text, length: text.length });
     setAddressText(text);
     
     // Cancel previous search
@@ -361,112 +351,120 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
     <Modal
       visible={visible}
       transparent={false}
-      animationType="none"
+      animationType="slide"
       onRequestClose={handleClose}
-      presentationStyle="fullScreen"
+      presentationStyle="formSheet"
     >
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-      <Animated.View
-        style={[
-          styles.container,
-          {
-            transform: [{ translateY: slideAnim }],
-          },
-        ]}
-      >
-        <SafeAreaView style={styles.safeArea}>
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity onPress={handleClose} style={styles.backButton}>
-              <AntDesign name="arrowleft" size={24} color="#111827" />
-            </TouchableOpacity>
-            <View style={styles.headerTitle}>
-              <Text style={styles.headerTitleText}>{fieldLabel}</Text>
-              <View style={[styles.fieldIndicator, { backgroundColor: getFieldColor() }]} />
-            </View>
-            <View style={styles.headerSpacer} />
+      <SafeAreaView style={styles.safeArea}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleClose} style={styles.backButton}>
+            <AntDesign name="arrowleft" size={24} color="#111827" />
+          </TouchableOpacity>
+          <View style={styles.headerTitle}>
+            <Text style={styles.headerTitleText}>{fieldLabel}</Text>
+            <View style={[styles.fieldIndicator, { backgroundColor: getFieldColor() }]} />
           </View>
+          <TouchableOpacity 
+            onPress={() => {
+              console.log('🔍 Manual focus button pressed');
+              inputRef.current?.focus();
+            }}
+            style={styles.backButton}
+          >
+            <AntDesign name="edit" size={20} color="#111827" />
+          </TouchableOpacity>
+        </View>
 
-          {/* Search Input */}
-          <View style={styles.searchContainer}>
-            <View style={[styles.searchInputContainer, { borderColor: getFieldColor() }]}>
-              <View style={[styles.searchIcon, { backgroundColor: getFieldColor() }]}>
-                <AntDesign name="search1" size={20} color="#FFFFFF" />
-              </View>
-              <TextInput
-                ref={inputRef}
-                style={styles.searchInput}
-                placeholder={placeholder}
-                placeholderTextColor="#9CA3AF"
-                value={addressText}
-                onChangeText={handleTextChange}
-                returnKeyType="search"
-                autoCorrect={false}
-                autoCapitalize="words"
-                onSubmitEditing={handleConfirm}
-              />
-              {addressText.length > 0 && (
-                <TouchableOpacity 
-                  onPress={() => setAddressText('')}
-                  style={styles.clearButton}
-                >
-                  <AntDesign name="close" size={16} color="#9CA3AF" />
-                </TouchableOpacity>
-              )}
+        {/* Search Input */}
+        <View style={styles.searchContainer}>
+          <View style={[styles.searchInputContainer, { borderColor: getFieldColor() }]}>
+            <View style={[styles.searchIcon, { backgroundColor: getFieldColor() }]}>
+              <AntDesign name="search1" size={20} color="#FFFFFF" />
             </View>
-          </View>
-
-          {/* Content */}
-          <View style={styles.content}>
-            {isSearching ? (
-              <View style={styles.loadingContainer}>
-                <Text style={styles.loadingText}>Searching addresses...</Text>
-              </View>
-            ) : predictions.length > 0 ? (
-              <FlatList
-                data={predictions}
-                renderItem={renderPrediction}
-                keyExtractor={(item) => item.place_id}
-                style={styles.predictionsList}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="always"
-                contentContainerStyle={styles.predictionsContent}
-              />
-            ) : addressText.length > 0 ? (
-              <View style={styles.noResultsContainer}>
-                <Text style={styles.noResultsText}>No addresses found</Text>
-                <Text style={styles.noResultsSubtext}>Try a different search term</Text>
-              </View>
-            ) : (
-              <View style={styles.recentsContainer}>
-                <Text style={styles.sectionTitle}>Recent searches</Text>
-                <FlatList
-                  data={recentSearches}
-                  renderItem={renderRecentSearch}
-                  keyExtractor={(item, index) => `recent-${index}`}
-                  style={styles.recentsList}
-                  showsVerticalScrollIndicator={false}
-                  keyboardShouldPersistTaps="always"
-                />
-              </View>
+            <TextInput
+              ref={inputRef}
+              style={styles.searchInput}
+              placeholder={placeholder}
+              placeholderTextColor="#9CA3AF"
+              value={addressText}
+              onChangeText={handleTextChange}
+              onFocus={() => {
+                console.log('🔍 TextInput focused successfully');
+              }}
+              onBlur={() => {
+                console.log('🔍 TextInput blurred');
+              }}
+              returnKeyType="search"
+              autoCorrect={false}
+              autoCapitalize="words"
+              onSubmitEditing={handleConfirm}
+              autoFocus={true}
+              editable={true}
+              selectTextOnFocus={false}
+            />
+            {addressText.length > 0 && (
+              <TouchableOpacity 
+                onPress={() => setAddressText('')}
+                style={styles.clearButton}
+              >
+                <AntDesign name="close" size={16} color="#9CA3AF" />
+              </TouchableOpacity>
             )}
           </View>
+        </View>
 
-          {/* Confirm Button */}
-          {addressText.length > 0 && (
-            <View style={styles.confirmContainer}>
-              <TouchableOpacity 
-                style={[styles.confirmButton, { backgroundColor: getFieldColor() }]}
-                onPress={handleConfirm}
-              >
-                <Text style={styles.confirmButtonText}>
-                  {predictions.length > 0 ? 'Select First Result' : 'Use This Address'}
-                </Text>
-              </TouchableOpacity>
+        {/* Content */}
+        <View style={styles.content}>
+          {isSearching ? (
+            <View style={styles.loadingContainer}>
+              <Text style={styles.loadingText}>Searching addresses...</Text>
+            </View>
+          ) : predictions.length > 0 ? (
+            <FlatList
+              data={predictions}
+              renderItem={renderPrediction}
+              keyExtractor={(item) => item.place_id}
+              style={styles.predictionsList}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="always"
+              contentContainerStyle={styles.predictionsContent}
+            />
+          ) : addressText.length > 0 ? (
+            <View style={styles.noResultsContainer}>
+              <Text style={styles.noResultsText}>No addresses found</Text>
+              <Text style={styles.noResultsSubtext}>Try a different search term</Text>
+            </View>
+          ) : (
+            <View style={styles.recentsContainer}>
+              <Text style={styles.sectionTitle}>Recent searches</Text>
+              <FlatList
+                data={recentSearches}
+                renderItem={renderRecentSearch}
+                keyExtractor={(item, index) => `recent-${index}`}
+                style={styles.recentsList}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="always"
+              />
             </View>
           )}
-        </SafeAreaView>
-      </Animated.View>
+        </View>
+
+        {/* Confirm Button */}
+        {addressText.length > 0 && (
+          <View style={styles.confirmContainer}>
+            <TouchableOpacity 
+              style={[styles.confirmButton, { backgroundColor: getFieldColor() }]}
+              onPress={handleConfirm}
+            >
+              <Text style={styles.confirmButtonText}>
+                {predictions.length > 0 ? 'Select First Result' : 'Use This Address'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </SafeAreaView>
     </Modal>
   );
 };

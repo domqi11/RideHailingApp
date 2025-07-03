@@ -22,6 +22,7 @@ import {
   Modal,
   KeyboardAvoidingView,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   AntDesign,
   Feather,
@@ -444,6 +445,19 @@ export default function RideHailingApp() {
             </View>
           )}
 
+          {/* Connector line between FROM and first stop (when stops exist) */}
+          {stops.filter(stop => 
+            stop && 
+            stop.id && 
+            stop.address && 
+            typeof stop.address === 'string' && 
+            stop.address.trim()
+          ).length > 0 && (
+            <View style={styles.journeyConnector}>
+              <View style={styles.connectorLine} />
+            </View>
+          )}
+
           {/* Stops */}
           {stops.filter(stop => 
             stop && 
@@ -451,9 +465,13 @@ export default function RideHailingApp() {
             stop.address && 
             typeof stop.address === 'string' && 
             stop.address.trim()
-          ).map((stop, index) => (
+          ).map((stop, index, filteredStops) => (
             <View key={stop.id}>
-              <View style={styles.stopField}>
+              <TouchableOpacity 
+                style={styles.stopField}
+                onPress={handleOpenLocationModal}
+                activeOpacity={0.7}
+              >
                 <View style={styles.addressFieldContent}>
                   <View style={styles.stopDot}>
                     <Text style={styles.stopNumber}>{index + 1}</Text>
@@ -471,40 +489,50 @@ export default function RideHailingApp() {
                     <AntDesign name="close" size={16} color="#EF4444" />
                   </TouchableOpacity>
                 </View>
-              </View>
+              </TouchableOpacity>
               
-              {/* Connector after each stop */}
-              <View style={styles.journeyConnector}>
-                <View style={styles.connectorLine} />
-              </View>
+              {/* Connector after each stop - except the last one */}
+              {index < filteredStops.length - 1 && (
+                <View style={styles.journeyConnector}>
+                  <View style={styles.connectorLine} />
+                </View>
+              )}
             </View>
           ))}
 
-          {/* Where To Field */}
-          <TouchableOpacity 
-            style={styles.addressField}
-            onPress={handleOpenLocationModal}
-            activeOpacity={0.7}
-          >
-            <View style={styles.addressFieldContent}>
-              <View style={styles.toDot} />
-              <View style={styles.addressTextContainer}>
-                {destinationLocation ? (
-                  <>
-                    <Text style={styles.addressLabel}>Where to?</Text>
-                    <Text style={styles.addressText} numberOfLines={1}>
-                      {destinationLocation.address}
-                    </Text>
-                  </>
-                ) : (
-                  <Text style={styles.wherePlaceholder}>Where to?</Text>
-                )}
+          {/* Where To Field - only show when there are no stops */}
+          {stops.filter(stop => 
+            stop && 
+            stop.id && 
+            stop.address && 
+            typeof stop.address === 'string' && 
+            stop.address.trim()
+          ).length === 0 && (
+            <TouchableOpacity 
+              style={styles.addressField}
+              onPress={handleOpenLocationModal}
+              activeOpacity={0.7}
+            >
+              <View style={styles.addressFieldContent}>
+                <View style={styles.toDot} />
+                <View style={styles.addressTextContainer}>
+                  {destinationLocation ? (
+                    <>
+                      <Text style={styles.addressLabel}>Where to?</Text>
+                      <Text style={styles.addressText} numberOfLines={1}>
+                        {destinationLocation.address}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={styles.wherePlaceholder}>Where to?</Text>
+                  )}
+                </View>
+                <View style={styles.addressArrow}>
+                  <AntDesign name="right" size={16} color="#9CA3AF" />
+                </View>
               </View>
-              <View style={styles.addressArrow}>
-                <AntDesign name="right" size={16} color="#9CA3AF" />
-              </View>
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -551,7 +579,40 @@ export default function RideHailingApp() {
         currentPickup={pickupLocation?.address}
         allowPickupEdit={true}
         stops={stops}
-        onStopsUpdated={setStops}
+        onStopsUpdated={(updatedStops) => {
+          try {
+            console.log('🔄 App received stops update:', { 
+              updatedStopsLength: updatedStops?.length || 0,
+              currentStopsLength: stops.length,
+              updatedStops: updatedStops
+            });
+            
+            // Validate stops before setting
+            if (Array.isArray(updatedStops)) {
+              const validStops = updatedStops.filter(stop => {
+                const isValid = stop && 
+                  stop.id && 
+                  typeof stop.id === 'string' &&
+                  typeof stop.address === 'string' &&
+                  stop.address.trim() !== ''; // Must have actual address content
+                
+                if (!isValid) {
+                  console.log('🔄 Filtering out invalid stop:', stop);
+                }
+                return isValid;
+              });
+              
+              console.log('🔄 Setting valid stops:', validStops.length, validStops);
+              setStops(validStops);
+            } else {
+              console.warn('⚠️ Invalid stops array received:', updatedStops);
+              setStops([]);
+            }
+          } catch (error) {
+            console.error('❌ Error updating stops in App:', error);
+            // Don't crash the app, just keep current stops
+          }
+        }}
       />
     </ScrollView>
   );
@@ -572,10 +633,14 @@ export default function RideHailingApp() {
       </View>
 
       <View style={styles.tripCard}>
-        <View style={styles.tripLocation}>
+        <TouchableOpacity 
+          style={styles.tripLocation}
+          onPress={handleOpenLocationModal}
+          activeOpacity={0.7}
+        >
           <View style={[styles.locationPin, { backgroundColor: '#3B82F6' }]} />
           <Text style={styles.tripLocationText}>{pickupLocation.address}</Text>
-        </View>
+        </TouchableOpacity>
         
         {/* Display stops */}
         {stops.filter(stop => 
@@ -585,22 +650,31 @@ export default function RideHailingApp() {
           typeof stop.address === 'string' && 
           stop.address.trim()
         ).map((stop, index) => (
-          <View key={stop.id} style={styles.tripLocation}>
+          <TouchableOpacity 
+            key={stop.id} 
+            style={styles.tripLocation}
+            onPress={handleOpenLocationModal}
+            activeOpacity={0.7}
+          >
             <View style={[styles.locationPin, { backgroundColor: '#3B82F6' }]}>
               <Text style={styles.stopPinText}>{index + 1}</Text>
             </View>
             <Text style={styles.tripLocationText} numberOfLines={1}>
               Stop {index + 1}: {stop.address}
             </Text>
-          </View>
+          </TouchableOpacity>
         ))}
         
-        <View style={styles.tripLocation}>
+        <TouchableOpacity 
+          style={styles.tripLocation}
+          onPress={handleOpenLocationModal}
+          activeOpacity={0.7}
+        >
           <View style={[styles.locationPin, { backgroundColor: '#EF4444' }]} />
           <Text style={styles.tripLocationText}>
             {destinationLocation?.address || '456 Oak Avenue'}
           </Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.rideOptions}>
@@ -936,44 +1010,46 @@ export default function RideHailingApp() {
   };
 
   return (
-    <ErrorBoundary>
-      <SafeAreaView style={styles.safeArea}>
-        <StatusBar barStyle="dark-content" backgroundColor="white" />
-        
-        {/* Header */}
-        <View style={styles.appHeader}>
-          <View>
-            <Text style={styles.appHeaderTitle}>
-              {currentScreen === 'profile' ? 'Profile' : 'Rides'}
-            </Text>
-            {currentStep === 'booking' && currentScreen === 'home' && (
-              <Text style={styles.appHeaderSubtitle}>Good afternoon, John</Text>
-            )}
-          </View>
-          <TouchableOpacity
-            onPress={handleToggleProfile}
-          >
-            <View style={styles.headerAvatar}>
-              <Text style={styles.headerAvatarText}>JD</Text>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ErrorBoundary>
+        <SafeAreaView style={styles.safeArea}>
+          <StatusBar barStyle="dark-content" backgroundColor="white" />
+          
+          {/* Header */}
+          <View style={styles.appHeader}>
+            <View>
+              <Text style={styles.appHeaderTitle}>
+                {currentScreen === 'profile' ? 'Profile' : 'Rides'}
+              </Text>
+              {currentStep === 'booking' && currentScreen === 'home' && (
+                <Text style={styles.appHeaderSubtitle}>Good afternoon, John</Text>
+              )}
             </View>
-          </TouchableOpacity>
-        </View>
-
-        {/* Back Button for Profile */}
-        {currentScreen === 'profile' && (
-          <View style={styles.profileBackHeader}>
             <TouchableOpacity
-              style={styles.backButton}
-              onPress={handleBackToHome}
+              onPress={handleToggleProfile}
             >
-              <AntDesign name="arrowleft" size={24} color="#3B82F6" />
+              <View style={styles.headerAvatar}>
+                <Text style={styles.headerAvatarText}>JD</Text>
+              </View>
             </TouchableOpacity>
           </View>
-        )}
 
-        {renderCurrentScreen()}
-      </SafeAreaView>
-    </ErrorBoundary>
+          {/* Back Button for Profile */}
+          {currentScreen === 'profile' && (
+            <View style={styles.profileBackHeader}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={handleBackToHome}
+              >
+                <AntDesign name="arrowleft" size={24} color="#3B82F6" />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {renderCurrentScreen()}
+        </SafeAreaView>
+      </ErrorBoundary>
+    </GestureHandlerRootView>
   );
 }
 
