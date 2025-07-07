@@ -500,22 +500,22 @@ export default function RideHailingApp() {
         </View>
       </View>
 
-      {/* Confirm Ride Button */}
+      {/* See Prices Button */}
       <View style={styles.buttonContainer}>
         <TouchableOpacity
           style={[
             styles.seePricesButton,
-            !selectedRide && { backgroundColor: '#E5E7EB' }
+            (!destinationLocation && stops.length === 0) && { backgroundColor: '#E5E7EB' }
           ]}
-          onPress={handleConfirmRide}
-          disabled={!selectedRide}
+          onPress={handleSeePrices}
+          disabled={!destinationLocation && stops.length === 0}
           activeOpacity={0.9}
         >
           <Text style={[
             styles.seePricesButtonText,
-            !selectedRide && { color: '#9CA3AF' }
+            (!destinationLocation && stops.length === 0) && { color: '#9CA3AF' }
           ]}>
-            Confirm Selection
+            See Prices
           </Text>
         </TouchableOpacity>
       </View>
