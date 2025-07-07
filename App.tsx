@@ -613,51 +613,131 @@ export default function RideHailingApp() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.tripCard}>
-        <TouchableOpacity 
-          style={styles.tripLocation}
-          onPress={handleOpenLocationModal}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.locationPin, { backgroundColor: '#3B82F6' }]} />
-          <Text style={styles.tripLocationText}>{pickupLocation?.address || 'Pickup location'}</Text>
-        </TouchableOpacity>
-        
-        {/* Display stops */}
-        {stops.filter(stop => 
-          stop && 
-          stop.id && 
-          stop.address && 
-          typeof stop.address === 'string' && 
-          stop.address.trim()
-        ).map((stop, index) => (
+      {/* Address Input Section */}
+      <View style={styles.inputContainer}>
+        <View style={styles.addressContainer}>
+          {/* From Address */}
           <TouchableOpacity 
-            key={stop.id} 
-            style={styles.tripLocation}
+            style={styles.addressField}
             onPress={handleOpenLocationModal}
             activeOpacity={0.7}
           >
-            <View style={[styles.locationPin, { backgroundColor: '#3B82F6' }]}>
-              <Text style={styles.stopPinText}>{index + 1}</Text>
+            <View style={styles.addressFieldContent}>
+              <View style={styles.fromDot} />
+              <View style={styles.addressTextContainer}>
+                <Text style={styles.addressLabel}>From</Text>
+                <Text style={styles.addressText} numberOfLines={1}>
+                  {pickupLocation ? pickupLocation.address : 'Loading your location...'}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={getCurrentLocation} style={styles.refreshLocationButton}>
+                <Feather name="refresh-cw" size={16} color="#6B7280" />
+              </TouchableOpacity>
             </View>
-            <Text style={styles.tripLocationText} numberOfLines={1}>
-              Stop {index + 1}: {stop.address}
-            </Text>
           </TouchableOpacity>
-        ))}
-        
-        <TouchableOpacity 
-          style={styles.tripLocation}
-          onPress={handleOpenLocationModal}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.locationPin, { backgroundColor: '#EF4444' }]} />
-          <Text style={styles.tripLocationText}>
-            {destinationLocation?.address || 'Destination'}
-          </Text>
-        </TouchableOpacity>
+
+          {/* Journey Line Connector (only if no stops) */}
+          {stops.length === 0 && (
+            <View style={styles.journeyConnector}>
+              <View style={styles.connectorLine} />
+              <View style={styles.connectorIcon}>
+                <MaterialIcons name="swap-vert" size={14} color="#FFFFFF" />
+              </View>
+            </View>
+          )}
+
+          {/* Connector line between FROM and first stop (when stops exist) */}
+          {stops.filter(stop => 
+            stop && 
+            stop.id && 
+            stop.address && 
+            typeof stop.address === 'string' && 
+            stop.address.trim()
+          ).length > 0 && (
+            <View style={styles.journeyConnector}>
+              <View style={styles.connectorLine} />
+            </View>
+          )}
+
+          {/* Stops */}
+          {stops.filter(stop => 
+            stop && 
+            stop.id && 
+            stop.address && 
+            typeof stop.address === 'string' && 
+            stop.address.trim()
+          ).map((stop, index, filteredStops) => (
+            <View key={stop.id}>
+              <TouchableOpacity 
+                style={styles.stopField}
+                onPress={handleOpenLocationModal}
+                activeOpacity={0.7}
+              >
+                <View style={styles.addressFieldContent}>
+                  <View style={styles.stopDot}>
+                    <Text style={styles.stopNumber}>{index + 1}</Text>
+                  </View>
+                  <View style={styles.addressTextContainer}>
+                    <Text style={styles.addressLabel}>Stop {index + 1}</Text>
+                    <Text style={styles.addressText} numberOfLines={1}>
+                      {stop.address}
+                    </Text>
+                  </View>
+                  <TouchableOpacity 
+                    onPress={() => handleRemoveStop(stop.id)} 
+                    style={styles.removeStopButton}
+                  >
+                    <AntDesign name="close" size={16} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
+              </TouchableOpacity>
+              
+              {/* Connector after each stop - except the last one */}
+              {index < filteredStops.length - 1 && (
+                <View style={styles.journeyConnector}>
+                  <View style={styles.connectorLine} />
+                </View>
+              )}
+            </View>
+          ))}
+
+          {/* Where To Field - only show when there are no stops */}
+          {stops.filter(stop => 
+            stop && 
+            stop.id && 
+            stop.address && 
+            typeof stop.address === 'string' && 
+            stop.address.trim()
+          ).length === 0 && (
+            <TouchableOpacity 
+              style={styles.addressField}
+              onPress={handleOpenLocationModal}
+              activeOpacity={0.7}
+            >
+              <View style={styles.addressFieldContent}>
+                <View style={styles.toDot} />
+                <View style={styles.addressTextContainer}>
+                  {destinationLocation ? (
+                    <>
+                      <Text style={styles.addressLabel}>Where to?</Text>
+                      <Text style={styles.addressText} numberOfLines={1}>
+                        {destinationLocation.address}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={styles.wherePlaceholder}>Where to?</Text>
+                  )}
+                </View>
+                <View style={styles.addressArrow}>
+                  <AntDesign name="right" size={16} color="#9CA3AF" />
+                </View>
+              </View>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
+      {/* Ride Options */}
       <View style={styles.rideOptions}>
         {rideOptions.map((ride, index) => {
           const isSelected = selectedRide === ride.id;
@@ -713,6 +793,82 @@ export default function RideHailingApp() {
           </Text>
         </TouchableOpacity>
       </View>
+
+      {/* Location Selection Modal */}
+      <SimpleLocationInput
+        visible={showLocationModal}
+        onClose={handleLocationModalClose}
+        onLocationSelected={handleLocationSelected}
+        currentDestination={destinationLocation?.address}
+        currentPickup={pickupLocation?.address}
+        allowPickupEdit={true}
+        stops={stops}
+        onStopsUpdated={async (updatedStops) => {
+          try {
+            console.log('🔄 App received stops update:', { 
+              updatedStopsLength: updatedStops?.length || 0,
+              currentStopsLength: stops.length,
+              updatedStops: updatedStops
+            });
+            
+            if (Array.isArray(updatedStops)) {
+              const validStops = [];
+              
+              // Process each stop and ensure it has valid coordinates
+              for (const stop of updatedStops) {
+                const isValid = stop && 
+                  stop.id && 
+                  typeof stop.id === 'string' &&
+                  typeof stop.address === 'string' &&
+                  stop.address.trim() !== '';
+                
+                if (!isValid) {
+                  console.log('🔄 Filtering out invalid stop:', stop);
+                  continue;
+                }
+                
+                // Check if stop has valid coordinates
+                if (AddressManager.isValidCoordinates(stop.latitude, stop.longitude)) {
+                  validStops.push(stop);
+                  console.log('✅ Stop has valid coordinates:', stop.address);
+                } else {
+                  // Geocode the stop address to get valid coordinates
+                  console.log('🔍 Geocoding stop address:', stop.address);
+                  const geocodeResult = await AddressManager.geocodeAddress(stop.address);
+                  if (geocodeResult.success && geocodeResult.data) {
+                    const geocodedStop = {
+                      ...stop,
+                      latitude: geocodeResult.data.latitude,
+                      longitude: geocodeResult.data.longitude
+                    };
+                    validStops.push(geocodedStop);
+                    console.log('✅ Stop geocoded successfully:', geocodedStop);
+                  } else {
+                    console.log('❌ Failed to geocode stop, using fallback coordinates:', stop.address);
+                    // Use fallback coordinates for the stop
+                    const fallbackCoords = AddressManager.getFallbackCoordinates(stop.address);
+                    const fallbackStop = {
+                      ...stop,
+                      latitude: fallbackCoords[0],
+                      longitude: fallbackCoords[1]
+                    };
+                    validStops.push(fallbackStop);
+                  }
+                }
+              }
+              
+              console.log('🔄 Setting valid stops with coordinates:', validStops.length, validStops);
+              setStops(validStops);
+            } else {
+              console.warn('⚠️ Invalid stops array received:', updatedStops);
+              setStops([]);
+            }
+          } catch (error) {
+            console.error('❌ Error updating stops in App:', error);
+            setStops([]);
+          }
+        }}
+      />
     </ScrollView>
   );
 
