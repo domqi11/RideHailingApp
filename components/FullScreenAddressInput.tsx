@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { AntDesign, Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import AddressManager from './AddressManager';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -49,107 +50,66 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
   const [addressText, setAddressText] = useState(initialValue);
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [recentSearches] = useState([
-    'Melbourne CBD, VIC, Australia',
-    'Flinders Street Station, Melbourne VIC, Australia',
-    'Melbourne Airport, VIC, Australia',
-    'Crown Casino, Melbourne VIC, Australia',
-    'Royal Melbourne Hospital, Parkville VIC, Australia',
-  ]);
-
-  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  
   const inputRef = useRef<TextInput>(null);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef(true);
 
-  // Use environment variable for API key
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
+  // Focus input when modal opens
   useEffect(() => {
-    isMountedRef.current = true;
-    
-    if (visible) {
-      console.log('🔍 FullScreen input opening:', { fieldType, fieldLabel });
-      setAddressText(initialValue);
-      
-      // Focus the input with multiple attempts
-      const focusAttempts = [100, 300, 500, 1000];
-      focusAttempts.forEach((delay, index) => {
-        setTimeout(() => {
-          console.log(`🔍 Focus attempt ${index + 1} at ${delay}ms`);
-          if (isMountedRef.current && inputRef.current) {
-            inputRef.current.focus();
-          }
-        }, delay);
-      });
+    if (visible && inputRef.current) {
+      // Small delay to ensure modal is fully rendered
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
     }
+  }, [visible]);
 
+  // Update address text when initial value changes
+  useEffect(() => {
+    if (initialValue !== addressText) {
+      setAddressText(initialValue);
+    }
+  }, [initialValue]);
+
+  // Cleanup on unmount
+  useEffect(() => {
     return () => {
       isMountedRef.current = false;
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [visible, initialValue]);
+  }, []);
 
   const searchPlaces = async (query: string) => {
-    if (!apiKey || query.length < 2 || !isMountedRef.current) {
-      setPredictions([]);
-      setIsSearching(false);
+    if (!apiKey) {
+      console.log('⚠️ No API key available for places search');
       return;
     }
 
     try {
       setIsSearching(true);
       
-      // Use Melbourne as bias location
-      const locationBias = '&location=-37.8136,144.9631&radius=200000';
-      
       const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${apiKey}&components=country:au${locationBias}&language=en`
+        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${apiKey}&types=address&components=country:au&language=en`
       );
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
       
       const data = await response.json();
       
-      if (data.status === 'OK' && data.predictions && isMountedRef.current) {
-        setPredictions(data.predictions.slice(0, 10));
+      if (data.predictions && Array.isArray(data.predictions)) {
+        setPredictions(data.predictions);
       } else {
         setPredictions([]);
       }
     } catch (error) {
+      console.error('Error searching places:', error);
       setPredictions([]);
     } finally {
-      if (isMountedRef.current) {
-        setIsSearching(false);
-      }
-    }
-  };
-
-  const getPlaceDetails = async (placeId: string): Promise<any> => {
-    if (!apiKey) {
-      throw new Error('No API key available');
-    }
-
-    try {
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&key=${apiKey}&fields=geometry,formatted_address`
-      );
-      const data = await response.json();
-
-      if (data.result && data.result.geometry) {
-        return {
-          latitude: data.result.geometry.location.lat,
-          longitude: data.result.geometry.location.lng,
-          address: data.result.formatted_address,
-        };
-      } else {
-        throw new Error('No place details found');
-      }
-    } catch (error) {
-      throw error;
+      setIsSearching(false);
     }
   };
 
@@ -186,17 +146,22 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
       setPredictions([]);
       setIsSearching(false);
 
-      // Get place details
-      const placeDetails = await getPlaceDetails(prediction.place_id);
+      // Get place details using AddressManager
+      const result = await AddressManager.getPlaceDetails(prediction.place_id);
       
-      // Return the address to parent
-      onAddressSelected(placeDetails);
-      
-      // Close with delay for smooth transition
-      setTimeout(() => {
-        handleClose();
-      }, 150);
+      if (result.success && result.data) {
+        // Return the standardized address data
+        onAddressSelected(AddressManager.toLegacyAddress(result.data));
+        
+        // Close with delay for smooth transition
+        setTimeout(() => {
+          handleClose();
+        }, 150);
+      } else {
+        throw new Error(result.error || 'Failed to get place details');
+      }
     } catch (error) {
+      console.error('Error selecting prediction:', error);
       Alert.alert('Error', 'Unable to get location details. Please try again.');
     }
   }, [onAddressSelected]);
@@ -207,48 +172,24 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
       
       setAddressText(address);
       
-      // Try to geocode the address
-      if (apiKey) {
-        try {
-          const response = await fetch(
-            `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`
-          );
-          
-          const data = await response.json();
-          
-          if (data.status === 'OK' && data.results && data.results.length > 0) {
-            const result = data.results[0];
-            const geocodedLocation = {
-              latitude: result.geometry.location.lat,
-              longitude: result.geometry.location.lng,
-              address: result.formatted_address,
-            };
-            
-            onAddressSelected(geocodedLocation);
-            setTimeout(() => {
-              handleClose();
-            }, 150);
-            return;
-          }
-        } catch (error) {
-          // Fall through to basic mode
-        }
+      // Use AddressManager to geocode the address
+      const result = await AddressManager.geocodeAddress(address);
+      
+      if (result.success && result.data) {
+        console.log('✅ Address geocoded successfully:', result.data);
+        onAddressSelected(AddressManager.toLegacyAddress(result.data));
+        
+        setTimeout(() => {
+          handleClose();
+        }, 150);
+      } else {
+        throw new Error(result.error || 'Failed to geocode address');
       }
-      
-      // Basic mode - return address as is
-      onAddressSelected({
-        latitude: -37.8136,
-        longitude: 144.9631,
-        address: address,
-      });
-      
-      setTimeout(() => {
-        handleClose();
-      }, 150);
     } catch (error) {
+      console.log('❌ Error in handleRecentSearchSelect:', error);
       Alert.alert('Error', 'Unable to process address. Please try again.');
     }
-  }, [apiKey, onAddressSelected]);
+  }, [onAddressSelected]);
 
   const handleClose = useCallback(() => {
     // Clear search timeout
@@ -267,31 +208,36 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
     onClose();
   }, [onClose]);
 
-  const handleConfirm = useCallback(() => {
+  const handleConfirm = useCallback(async () => {
     if (!addressText.trim()) {
       Alert.alert('Error', 'Please enter an address.');
       return;
     }
 
-    // If we have predictions, use the first one
-    if (predictions.length > 0) {
-      handlePredictionSelect(predictions[0]);
-      return;
-    }
+    try {
+      // If we have predictions, use the first one
+      if (predictions.length > 0) {
+        await handlePredictionSelect(predictions[0]);
+        return;
+      }
 
-    // Otherwise, try to geocode manually entered text
-    if (apiKey) {
-      handleRecentSearchSelect(addressText.trim());
-    } else {
-      // Basic mode
-      onAddressSelected({
-        latitude: -37.8136,
-        longitude: 144.9631,
-        address: addressText.trim(),
-      });
-      handleClose();
+      // Otherwise, geocode the manually entered text using AddressManager
+      console.log('🔍 Geocoding manually entered address:', addressText);
+      
+      const result = await AddressManager.geocodeAddress(addressText.trim());
+      
+      if (result.success && result.data) {
+        console.log('✅ Manual address geocoded successfully:', result.data);
+        onAddressSelected(AddressManager.toLegacyAddress(result.data));
+        handleClose();
+      } else {
+        throw new Error(result.error || 'Failed to geocode address');
+      }
+    } catch (error) {
+      console.error('Error confirming address:', error);
+      Alert.alert('Error', 'Unable to process address. Please try again.');
     }
-  }, [addressText, predictions, apiKey, handlePredictionSelect, handleRecentSearchSelect, onAddressSelected]);
+  }, [addressText, predictions, handlePredictionSelect, onAddressSelected]);
 
   const getFieldColor = () => {
     switch (fieldType) {
@@ -353,117 +299,78 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
       transparent={false}
       animationType="slide"
       onRequestClose={handleClose}
-      presentationStyle="formSheet"
+      statusBarTranslucent
     >
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={handleClose} style={styles.backButton}>
-            <AntDesign name="arrowleft" size={24} color="#111827" />
+            <AntDesign name="arrowleft" size={24} color="#3B82F6" />
           </TouchableOpacity>
-          <View style={styles.headerTitle}>
-            <Text style={styles.headerTitleText}>{fieldLabel}</Text>
-            <View style={[styles.fieldIndicator, { backgroundColor: getFieldColor() }]} />
-          </View>
-          <TouchableOpacity 
-            onPress={() => {
-              console.log('🔍 Manual focus button pressed');
-              inputRef.current?.focus();
-            }}
-            style={styles.backButton}
-          >
-            <AntDesign name="edit" size={20} color="#111827" />
+          <Text style={styles.headerTitle}>{fieldLabel}</Text>
+          <TouchableOpacity onPress={handleConfirm} style={styles.confirmButton}>
+            <Text style={styles.confirmButtonText}>Done</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Search Input */}
-        <View style={styles.searchContainer}>
-          <View style={[styles.searchInputContainer, { borderColor: getFieldColor() }]}>
-            <View style={[styles.searchIcon, { backgroundColor: getFieldColor() }]}>
-              <AntDesign name="search1" size={20} color="#FFFFFF" />
-            </View>
+        {/* Address Input */}
+        <View style={styles.inputContainer}>
+          <View style={styles.inputWrapper}>
+            <View style={[styles.inputDot, { backgroundColor: getFieldColor() }]} />
             <TextInput
               ref={inputRef}
-              style={styles.searchInput}
-              placeholder={placeholder}
-              placeholderTextColor="#9CA3AF"
+              style={styles.input}
               value={addressText}
               onChangeText={handleTextChange}
-              onFocus={() => {
-                console.log('🔍 TextInput focused successfully');
-              }}
-              onBlur={() => {
-                console.log('🔍 TextInput blurred');
-              }}
-              returnKeyType="search"
-              autoCorrect={false}
-              autoCapitalize="words"
-              onSubmitEditing={handleConfirm}
+              placeholder={placeholder}
+              placeholderTextColor="#9CA3AF"
               autoFocus={true}
-              editable={true}
-              selectTextOnFocus={false}
+              returnKeyType="search"
+              onSubmitEditing={handleConfirm}
+              clearButtonMode="while-editing"
             />
-            {addressText.length > 0 && (
-              <TouchableOpacity 
-                onPress={() => setAddressText('')}
-                style={styles.clearButton}
-              >
-                <AntDesign name="close" size={16} color="#9CA3AF" />
-              </TouchableOpacity>
-            )}
           </View>
         </View>
 
-        {/* Content */}
-        <View style={styles.content}>
-          {isSearching ? (
+        {/* Results */}
+        <View style={styles.resultsContainer}>
+          {isSearching && (
             <View style={styles.loadingContainer}>
-              <Text style={styles.loadingText}>Searching addresses...</Text>
+              <Text style={styles.loadingText}>Searching...</Text>
             </View>
-          ) : predictions.length > 0 ? (
+          )}
+
+          {predictions.length > 0 && (
             <FlatList
               data={predictions}
               renderItem={renderPrediction}
               keyExtractor={(item) => item.place_id}
-              style={styles.predictionsList}
               showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="always"
-              contentContainerStyle={styles.predictionsContent}
+              keyboardShouldPersistTaps="handled"
             />
-          ) : addressText.length > 0 ? (
-            <View style={styles.noResultsContainer}>
-              <Text style={styles.noResultsText}>No addresses found</Text>
-              <Text style={styles.noResultsSubtext}>Try a different search term</Text>
+          )}
+
+          {predictions.length === 0 && !isSearching && addressText.trim() === '' && (
+            <View style={styles.emptyState}>
+              <AntDesign name="enviromento" size={48} color="#E5E7EB" />
+              <Text style={styles.emptyStateTitle}>Find your location</Text>
+              <Text style={styles.emptyStateSubtitle}>
+                Enter an address, landmark, or place name
+              </Text>
             </View>
-          ) : (
-            <View style={styles.recentsContainer}>
-              <Text style={styles.sectionTitle}>Recent searches</Text>
-              <FlatList
-                data={recentSearches}
-                renderItem={renderRecentSearch}
-                keyExtractor={(item, index) => `recent-${index}`}
-                style={styles.recentsList}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="always"
-              />
+          )}
+
+          {predictions.length === 0 && !isSearching && addressText.trim() !== '' && (
+            <View style={styles.emptyState}>
+              <AntDesign name="frown" size={48} color="#E5E7EB" />
+              <Text style={styles.emptyStateTitle}>No results found</Text>
+              <Text style={styles.emptyStateSubtitle}>
+                Try a different search term or confirm to use "{addressText}"
+              </Text>
             </View>
           )}
         </View>
-
-        {/* Confirm Button */}
-        {addressText.length > 0 && (
-          <View style={styles.confirmContainer}>
-            <TouchableOpacity 
-              style={[styles.confirmButton, { backgroundColor: getFieldColor() }]}
-              onPress={handleConfirm}
-            >
-              <Text style={styles.confirmButtonText}>
-                {predictions.length > 0 ? 'Select First Result' : 'Use This Address'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </SafeAreaView>
     </Modal>
   );
@@ -682,6 +589,55 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  inputContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#F3F4F6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  inputDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginHorizontal: 12,
+  },
+  input: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#111827',
+    paddingVertical: 16,
+  },
+  resultsContainer: {
+    flex: 1,
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  emptyStateSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
   },
 });
 

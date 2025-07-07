@@ -35,6 +35,7 @@ import * as Haptics from 'expo-haptics';
 import MapViewComponent from './components/MapView';
 import ErrorBoundary from './components/ErrorBoundary';
 import SimpleLocationInput from './components/SimpleLocationInput';
+import AddressManager, { type AddressData } from './components/AddressManager';
 
 const { width } = Dimensions.get('window');
 
@@ -44,9 +45,9 @@ export default function RideHailingApp() {
   const [currentScreen, setCurrentScreen] = useState('home');
   const [showLocationModal, setShowLocationModal] = useState(false);
   
-  // Location state
-  const [pickupLocation, setPickupLocation] = useState(null);
-  const [destinationLocation, setDestinationLocation] = useState(null);
+  // Location state using AddressManager
+  const [pickupLocation, setPickupLocation] = useState<AddressData | null>(null);
+  const [destinationLocation, setDestinationLocation] = useState<AddressData | null>(null);
   const [stops, setStops] = useState([]); // Array of stop locations
 
   // Automatically get user's current location when app loads
@@ -67,11 +68,12 @@ export default function RideHailingApp() {
           text: 'Use Default Location',
           style: 'cancel',
           onPress: () => {
-            setPickupLocation({
-              latitude: -37.8136,
-              longitude: 144.9631,
-              address: 'Melbourne, Australia (Default)',
-            });
+            setPickupLocation(AddressManager.createAddressData(
+              'Melbourne, Australia (Default)',
+              -37.8136,
+              144.9631,
+              'fallback'
+            ));
           }
         },
         {
@@ -84,161 +86,93 @@ export default function RideHailingApp() {
 
   const getCurrentLocation = async () => {
     try {
-      // First check if location services are enabled
-      let { status } = await Location.getForegroundPermissionsAsync();
+      console.log('Getting current location using AddressManager...');
       
-      if (status !== 'granted') {
-        console.log('Location permission not granted, requesting...');
-        const permissionResult = await Location.requestForegroundPermissionsAsync();
-        status = permissionResult.status;
-        
-        if (status !== 'granted') {
-          console.log('Location permission denied by user');
-          showLocationPermissionHelp();
-          return;
-        }
-      }
-
-      console.log('Getting current position...');
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      console.log('Location obtained:', location.coords);
-
-      // Use Google's Reverse Geocoding API for better address formatting
-      const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+      const result = await AddressManager.getCurrentLocation();
       
-      if (apiKey) {
-        try {
-          console.log('Getting address from Google Geocoding...');
-          const response = await fetch(
-            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${location.coords.latitude},${location.coords.longitude}&key=${apiKey}`
-          );
-          
-          const data = await response.json();
-          
-          if (data.status === 'OK' && data.results && data.results.length > 0) {
-            const address = data.results[0].formatted_address;
-            console.log('Address found:', address);
-            setPickupLocation({
-              latitude: location.coords.latitude,
-              longitude: location.coords.longitude,
-              address: address,
-            });
-            return;
-          } else {
-            console.log('Geocoding API returned:', data.status);
-            throw new Error('Geocoding failed');
-          }
-        } catch (geocodingError) {
-          console.log('Google Geocoding failed:', geocodingError);
-          // Fall back to basic location without formatted address
-        }
+      if (result.success && result.data) {
+        setPickupLocation(result.data);
+        console.log('✅ Current location set:', result.data);
       } else {
-        console.log('No Google API key, using device geocoding');
-      }
-
-      // Fallback: Use basic location with Expo's reverse geocoding
-      try {
-        const [address] = await Location.reverseGeocodeAsync({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        });
-        
-        const formattedAddress = `${address.street || ''} ${address.city || ''}, ${address.region || ''} ${address.postalCode || ''}`.trim();
-        
-        setPickupLocation({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          address: formattedAddress || 'Current Location',
-        });
-      } catch (reverseGeoError) {
-        console.log('Reverse geocoding failed:', reverseGeoError);
-        // Final fallback: Just use coordinates
-        setPickupLocation({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          address: 'Current Location',
-        });
+        console.error('❌ Failed to get current location:', result.error);
+        showLocationPermissionHelp();
       }
     } catch (error) {
-      console.error('Error getting current location:', error);
-      
-      // Provide specific error messages based on error type
-      let errorMessage = 'Melbourne, Australia (Location unavailable)';
-      
-      if (error.code === 'E_LOCATION_SERVICES_DISABLED') {
-        errorMessage = 'Melbourne, Australia (Location services disabled)';
-      } else if (error.code === 'E_LOCATION_TIMEOUT') {
-        errorMessage = 'Melbourne, Australia (Location timeout)';
-      } else if (error.message && error.message.includes('denied')) {
-        errorMessage = 'Melbourne, Australia (Location permission denied)';
-      }
+      console.error('❌ Error getting current location:', error);
       
       // Fallback to Melbourne
-      setPickupLocation({
-        latitude: -37.8136,
-        longitude: 144.9631,
-        address: errorMessage,
-      });
+      setPickupLocation(AddressManager.createAddressData(
+        'Melbourne, Australia (Location Error)',
+        -37.8136,
+        144.9631,
+        'fallback'
+      ));
     }
   };
 
   // Location handlers
-  const handleLocationSelected = (pickup: any, destination: any) => {
+  const handleLocationSelected = async (pickup: any, destination: any) => {
     try {
-      console.log('Location Selected:', { pickup, destination });
+      console.log('🔍 Location Selected:', { pickup, destination });
       
-      // Validate and set pickup location
+      // Convert legacy format to AddressData and validate
       if (pickup && typeof pickup === 'object') {
-        // Ensure pickup has valid coordinates and address
-        if (typeof pickup.latitude === 'number' && 
-            typeof pickup.longitude === 'number' && 
-            !isNaN(pickup.latitude) && 
-            !isNaN(pickup.longitude) && 
-            Math.abs(pickup.latitude) <= 90 && 
-            Math.abs(pickup.longitude) <= 180) {
-          
-          setPickupLocation({
-            latitude: pickup.latitude,
-            longitude: pickup.longitude,
-            address: pickup.address || 'Selected Location',
-          });
-        } else if (pickup.address && typeof pickup.address === 'string' && pickup.address.trim()) {
-          // If no valid coordinates but has address, keep current location but update address
-          console.log('Pickup has address but invalid coordinates, keeping current location');
+        if (pickup.address && typeof pickup.address === 'string' && pickup.address.trim()) {
+          // If we have valid coordinates, use them. Otherwise, geocode the address
+          if (AddressManager.isValidCoordinates(pickup.latitude, pickup.longitude)) {
+            const pickupAddressData = AddressManager.createAddressData(
+              pickup.address,
+              pickup.latitude,
+              pickup.longitude,
+              'geocoded'
+            );
+            setPickupLocation(pickupAddressData);
+            console.log('✅ Pickup location updated with valid coordinates:', pickupAddressData);
+          } else {
+            // Geocode the address to get proper coordinates
+            console.log('🔍 Geocoding pickup address:', pickup.address);
+            const result = await AddressManager.geocodeAddress(pickup.address);
+            if (result.success && result.data) {
+              setPickupLocation(result.data);
+              console.log('✅ Pickup location geocoded:', result.data);
+            } else {
+              console.error('❌ Failed to geocode pickup address');
+            }
+          }
         }
       }
       
-      // Validate and set destination location - only if destination is provided and valid
+      // Validate and set destination location
       if (destination && typeof destination === 'object') {
-        if (typeof destination.latitude === 'number' && 
-            typeof destination.longitude === 'number' && 
-            !isNaN(destination.latitude) && 
-            !isNaN(destination.longitude) && 
-            Math.abs(destination.latitude) <= 90 && 
-            Math.abs(destination.longitude) <= 180 &&
-            destination.address && 
-            typeof destination.address === 'string' && 
-            destination.address.trim()) {
-          
-          setDestinationLocation({
-            latitude: destination.latitude,
-            longitude: destination.longitude,
-            address: destination.address.trim(),
-          });
-        } else if (destination.address && typeof destination.address === 'string' && destination.address.trim()) {
-          // If destination only has address, keep the text but don't update coordinates
-          console.log('Destination has address but no valid coordinates:', destination.address);
+        if (destination.address && typeof destination.address === 'string' && destination.address.trim()) {
+          // If we have valid coordinates, use them. Otherwise, geocode the address
+          if (AddressManager.isValidCoordinates(destination.latitude, destination.longitude)) {
+            const destinationAddressData = AddressManager.createAddressData(
+              destination.address,
+              destination.latitude,
+              destination.longitude,
+              'geocoded'
+            );
+            setDestinationLocation(destinationAddressData);
+            console.log('✅ Destination location updated with valid coordinates:', destinationAddressData);
+          } else {
+            // Geocode the address to get proper coordinates
+            console.log('🔍 Geocoding destination address:', destination.address);
+            const result = await AddressManager.geocodeAddress(destination.address);
+            if (result.success && result.data) {
+              setDestinationLocation(result.data);
+              console.log('✅ Destination location geocoded:', result.data);
+            } else {
+              console.error('❌ Failed to geocode destination address');
+            }
+          }
         }
       }
       
       // Close modal immediately for better responsiveness
       setShowLocationModal(false);
     } catch (error) {
-      console.error('Error in handleLocationSelected:', error);
-      // Safely close modal even if there's an error
+      console.error('❌ Error in handleLocationSelected:', error);
       setShowLocationModal(false);
       Alert.alert('Error', 'Failed to process location data. Please try again.');
     }
@@ -246,12 +180,10 @@ export default function RideHailingApp() {
 
   const handleLocationModalClose = () => {
     try {
-      // Use setTimeout to schedule the state update properly and prevent race conditions
       setTimeout(() => {
         setShowLocationModal(false);
       }, 0);
     } catch (error) {
-      // Fallback: Force close modal
       setShowLocationModal(false);
     }
   };
@@ -401,9 +333,18 @@ export default function RideHailingApp() {
         {pickupLocation ? (
           <MapViewComponent
             key={`${pickupLocation.latitude}-${pickupLocation.longitude}-${destinationLocation?.latitude || 'none'}-${destinationLocation?.longitude || 'none'}-${stops.length}`}
-            pickupLocation={pickupLocation}
-            destinationLocation={destinationLocation}
-            stops={stops}
+            pickupLocation={AddressManager.toLegacyAddress(pickupLocation)}
+            destinationLocation={destinationLocation ? AddressManager.toLegacyAddress(destinationLocation) : undefined}
+            stops={(() => {
+              console.log('🗺️ Passing stops to MapView:', stops.length, stops.map(stop => ({
+                id: stop.id,
+                address: stop.address?.substring(0, 30) + '...',
+                lat: stop.latitude,
+                lng: stop.longitude,
+                hasValidCoords: AddressManager.isValidCoordinates(stop.latitude, stop.longitude)
+              })));
+              return stops;
+            })()}
           />
         ) : (
           <View style={styles.loadingMapContainer}>
@@ -537,38 +478,51 @@ export default function RideHailingApp() {
       </View>
 
       {/* Quick Actions */}
-      <View style={styles.quickActions}>
-        <TouchableOpacity style={styles.quickActionButton}>
-          <View style={styles.quickActionIcon}>
-            <AntDesign name="clockcircleo" size={16} color="white" />
-          </View>
-          <Text style={styles.quickActionText}>Schedule</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.quickActionButton}>
-          <View style={styles.quickActionIcon}>
-            <AntDesign name="staro" size={16} color="white" />
-          </View>
-          <Text style={styles.quickActionText}>Favorites</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.quickActionButton} onPress={handleAddStop}>
-          <View style={styles.quickActionIcon}>
-            <AntDesign name="plus" size={16} color="white" />
-          </View>
-          <Text style={styles.quickActionText}>Add Stop</Text>
-        </TouchableOpacity>
+      <View style={styles.quickActionsContainer}>
+        <Text style={styles.quickActionsTitle}>Quick Actions</Text>
+        <View style={styles.quickActions}>
+          <TouchableOpacity style={styles.quickAction} onPress={handleAddStop}>
+            <View style={styles.quickActionIcon}>
+              <AntDesign name="plus" size={20} color="#3B82F6" />
+            </View>
+            <Text style={styles.quickActionText}>Add Stop</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.quickAction}>
+            <View style={styles.quickActionIcon}>
+              <Feather name="clock" size={20} color="#3B82F6" />
+            </View>
+            <Text style={styles.quickActionText}>Schedule</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.quickAction}>
+            <View style={styles.quickActionIcon}>
+              <MaterialIcons name="group" size={20} color="#3B82F6" />
+            </View>
+            <Text style={styles.quickActionText}>Group Ride</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      <TouchableOpacity
-        style={[styles.primaryButton, !destinationLocation && styles.primaryButtonDisabled]}
-        onPress={handleSeePrices}
-        disabled={!destinationLocation}
-      >
-        <Text style={[styles.primaryButtonText, !destinationLocation && styles.primaryButtonTextDisabled]}>
-          See Prices
-        </Text>
-      </TouchableOpacity>
+      {/* Confirm Ride Button */}
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity
+          style={[
+            styles.seePricesButton,
+            !selectedRide && { backgroundColor: '#E5E7EB' }
+          ]}
+          onPress={handleConfirmRide}
+          disabled={!selectedRide}
+          activeOpacity={0.9}
+        >
+          <Text style={[
+            styles.seePricesButtonText,
+            !selectedRide && { color: '#9CA3AF' }
+          ]}>
+            Confirm Selection
+          </Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Location Selection Modal */}
       <SimpleLocationInput
@@ -579,7 +533,7 @@ export default function RideHailingApp() {
         currentPickup={pickupLocation?.address}
         allowPickupEdit={true}
         stops={stops}
-        onStopsUpdated={(updatedStops) => {
+        onStopsUpdated={async (updatedStops) => {
           try {
             console.log('🔄 App received stops update:', { 
               updatedStopsLength: updatedStops?.length || 0,
@@ -587,22 +541,53 @@ export default function RideHailingApp() {
               updatedStops: updatedStops
             });
             
-            // Validate stops before setting
             if (Array.isArray(updatedStops)) {
-              const validStops = updatedStops.filter(stop => {
+              const validStops = [];
+              
+              // Process each stop and ensure it has valid coordinates
+              for (const stop of updatedStops) {
                 const isValid = stop && 
                   stop.id && 
                   typeof stop.id === 'string' &&
                   typeof stop.address === 'string' &&
-                  stop.address.trim() !== ''; // Must have actual address content
+                  stop.address.trim() !== '';
                 
                 if (!isValid) {
                   console.log('🔄 Filtering out invalid stop:', stop);
+                  continue;
                 }
-                return isValid;
-              });
+                
+                // Check if stop has valid coordinates
+                if (AddressManager.isValidCoordinates(stop.latitude, stop.longitude)) {
+                  validStops.push(stop);
+                  console.log('✅ Stop has valid coordinates:', stop.address);
+                } else {
+                  // Geocode the stop address to get valid coordinates
+                  console.log('🔍 Geocoding stop address:', stop.address);
+                  const geocodeResult = await AddressManager.geocodeAddress(stop.address);
+                  if (geocodeResult.success && geocodeResult.data) {
+                    const geocodedStop = {
+                      ...stop,
+                      latitude: geocodeResult.data.latitude,
+                      longitude: geocodeResult.data.longitude
+                    };
+                    validStops.push(geocodedStop);
+                    console.log('✅ Stop geocoded successfully:', geocodedStop);
+                  } else {
+                    console.log('❌ Failed to geocode stop, using fallback coordinates:', stop.address);
+                    // Use fallback coordinates for the stop
+                    const fallbackCoords = AddressManager.getFallbackCoordinates(stop.address);
+                    const fallbackStop = {
+                      ...stop,
+                      latitude: fallbackCoords[0],
+                      longitude: fallbackCoords[1]
+                    };
+                    validStops.push(fallbackStop);
+                  }
+                }
+              }
               
-              console.log('🔄 Setting valid stops:', validStops.length, validStops);
+              console.log('🔄 Setting valid stops with coordinates:', validStops.length, validStops);
               setStops(validStops);
             } else {
               console.warn('⚠️ Invalid stops array received:', updatedStops);
@@ -610,7 +595,7 @@ export default function RideHailingApp() {
             }
           } catch (error) {
             console.error('❌ Error updating stops in App:', error);
-            // Don't crash the app, just keep current stops
+            setStops([]);
           }
         }}
       />
@@ -639,7 +624,7 @@ export default function RideHailingApp() {
           activeOpacity={0.7}
         >
           <View style={[styles.locationPin, { backgroundColor: '#3B82F6' }]} />
-          <Text style={styles.tripLocationText}>{pickupLocation.address}</Text>
+          <Text style={styles.tripLocationText}>{pickupLocation?.address || 'Pickup location'}</Text>
         </TouchableOpacity>
         
         {/* Display stops */}
@@ -672,7 +657,7 @@ export default function RideHailingApp() {
         >
           <View style={[styles.locationPin, { backgroundColor: '#EF4444' }]} />
           <Text style={styles.tripLocationText}>
-            {destinationLocation?.address || '456 Oak Avenue'}
+            {destinationLocation?.address || 'Destination'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -713,15 +698,25 @@ export default function RideHailingApp() {
         })}
       </View>
 
-      <TouchableOpacity
-        style={[styles.primaryButton, !selectedRide && styles.primaryButtonDisabled]}
-        onPress={handleConfirmRide}
-        disabled={!selectedRide}
-      >
-        <Text style={[styles.primaryButtonText, !selectedRide && styles.primaryButtonTextDisabled]}>
-          Confirm {selectedRide && rideOptions.find((r) => r.id === selectedRide)?.name}
-        </Text>
-      </TouchableOpacity>
+      {/* Confirm Selection Button */}
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity
+          style={[
+            styles.seePricesButton,
+            !selectedRide && { backgroundColor: '#E5E7EB' }
+          ]}
+          onPress={handleConfirmRide}
+          disabled={!selectedRide}
+          activeOpacity={0.9}
+        >
+          <Text style={[
+            styles.seePricesButtonText,
+            !selectedRide && { color: '#9CA3AF' }
+          ]}>
+            Confirm Selection
+          </Text>
+        </TouchableOpacity>
+      </View>
     </ScrollView>
   );
 
@@ -787,12 +782,16 @@ export default function RideHailingApp() {
         </View>
       </View>
 
-      <TouchableOpacity
-        style={[styles.primaryButton, { backgroundColor: '#10B981' }]}
-        onPress={handleTrackRide}
-      >
-        <Text style={styles.primaryButtonText}>Track your ride</Text>
-      </TouchableOpacity>
+      {/* Continue tracking button */}
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity
+          style={[styles.seePricesButton, { backgroundColor: '#10B981' }]}
+          onPress={handleTrackRide}
+          activeOpacity={0.9}
+        >
+          <Text style={styles.seePricesButtonText}>Track your ride</Text>
+        </TouchableOpacity>
+      </View>
     </ScrollView>
   );
 
@@ -1249,12 +1248,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  quickActionsContainer: {
+    marginBottom: 32,
+  },
+  quickActionsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 12,
+  },
   quickActions: {
     flexDirection: 'row',
-    marginBottom: 32,
     gap: 16,
   },
-  quickActionButton: {
+  quickAction: {
     flex: 1,
     height: 96,
     backgroundColor: '#F9FAFB',
@@ -1276,24 +1283,22 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#111827',
   },
-  primaryButton: {
+  buttonContainer: {
+    marginBottom: 24,
+  },
+  seePricesButton: {
     height: 56,
     backgroundColor: '#3B82F6',
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 24,
+    flexDirection: 'row',
+    gap: 12,
   },
-  primaryButtonText: {
+  seePricesButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: 'white',
-  },
-  primaryButtonDisabled: {
-    backgroundColor: '#E5E7EB',
-  },
-  primaryButtonTextDisabled: {
-    color: '#9CA3AF',
   },
   header: {
     flexDirection: 'row',
