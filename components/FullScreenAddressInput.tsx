@@ -32,6 +32,7 @@ interface FullScreenAddressInputProps {
 interface PlacePrediction {
   place_id: string;
   description: string;
+  types?: string[];
   structured_formatting: {
     main_text: string;
     secondary_text: string;
@@ -45,7 +46,7 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
   fieldType,
   fieldLabel,
   initialValue = '',
-  placeholder = 'Enter address or landmark...',
+  placeholder = 'Search places, businesses, or addresses...',
 }) => {
   const [addressText, setAddressText] = useState(initialValue);
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
@@ -94,22 +95,202 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
     try {
       setIsSearching(true);
       
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&key=${apiKey}&types=address&components=country:au&language=en`
-      );
+      console.log('🔍 Searching for places:', query);
       
+      // Get user's current location for location bias (optional)
+      let locationBias = '';
+      try {
+        const currentLocation = await AddressManager.getCurrentLocation();
+        if (currentLocation.success && currentLocation.data) {
+          const { latitude, longitude } = currentLocation.data;
+          if (AddressManager.isValidCoordinates(latitude, longitude)) {
+            // Add location bias to prioritize nearby places
+            locationBias = `&location=${latitude},${longitude}&radius=50000`; // 50km radius
+          }
+        }
+      } catch (error) {
+        console.log('📍 Could not get location for bias, using default search');
+      }
+      
+      // Enhanced search with comprehensive parameters like Google Maps
+      const searchUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?` +
+        `input=${encodeURIComponent(query)}` +
+        `&key=${apiKey}` +
+        `&components=country:au` +
+        `&language=en` +
+        `&sessiontoken=${Date.now()}` +
+        locationBias +
+        `&strictbounds=false`; // Allow results outside bounds but prioritize nearby
+      
+      console.log('🔍 Search URL:', searchUrl.replace(apiKey, 'API_KEY_HIDDEN'));
+      
+      const response = await fetch(searchUrl);
       const data = await response.json();
       
-      if (data.predictions && Array.isArray(data.predictions)) {
-        setPredictions(data.predictions);
+      console.log('🔍 Places API response:', {
+        status: data.status,
+        predictionsCount: data.predictions?.length || 0,
+        firstFew: data.predictions?.slice(0, 5).map(p => ({
+          name: p.description,
+          types: p.types?.slice(0, 3) || ['no_types']
+        })) || [],
+        errorMessage: data.error_message
+      });
+      
+      if (data.status === 'OK' && data.predictions && Array.isArray(data.predictions)) {
+        // Enhanced sorting for better UX - prioritize more relevant results
+        const sortedPredictions = data.predictions.sort((a, b) => {
+          // Priority 1: Exact or close matches in main text
+          const aMainText = a.structured_formatting?.main_text?.toLowerCase() || '';
+          const bMainText = b.structured_formatting?.main_text?.toLowerCase() || '';
+          const queryLower = query.toLowerCase();
+          
+          const aStartsWithQuery = aMainText.startsWith(queryLower);
+          const bStartsWithQuery = bMainText.startsWith(queryLower);
+          
+          if (aStartsWithQuery && !bStartsWithQuery) return -1;
+          if (!aStartsWithQuery && bStartsWithQuery) return 1;
+          
+          // Priority 2: Popular place types that users frequently search for
+          const getPlacePriority = (types: string[]) => {
+            if (types.includes('airport')) return 1;
+            if (types.includes('shopping_mall') || types.includes('shopping_center')) return 2;
+            if (types.includes('hospital')) return 3;
+            if (types.includes('restaurant') || types.includes('food')) return 4;
+            if (types.includes('gas_station')) return 5;
+            if (types.includes('bank')) return 6;
+            if (types.includes('pharmacy')) return 7;
+            if (types.includes('school') || types.includes('university')) return 8;
+            if (types.includes('establishment') || types.includes('point_of_interest')) return 9;
+            if (types.includes('transit_station') || types.includes('train_station')) return 10;
+            return 11; // Regular addresses
+          };
+          
+          const aPriority = getPlacePriority(a.types || []);
+          const bPriority = getPlacePriority(b.types || []);
+          
+          if (aPriority !== bPriority) return aPriority - bPriority;
+          
+          // Priority 3: Shorter distance if available (Google's natural ordering)
+          return 0;
+        });
+        
+        setPredictions(sortedPredictions);
+        
+        // If we have very few results, try to supplement with additional search
+        if (sortedPredictions.length < 3) {
+          console.log('🔍 Few predictions returned, trying supplemental search');
+          await performSupplementalSearch(query, sortedPredictions);
+        }
       } else {
-        setPredictions([]);
+        console.log('❌ Places API error:', {
+          status: data.status,
+          error: data.error_message,
+          predictions: data.predictions
+        });
+        
+        // Try fallback search on API error
+        if (data.status !== 'OK') {
+          await performFallbackSearch(query);
+        } else {
+          setPredictions([]);
+        }
       }
     } catch (error) {
-      console.error('Error searching places:', error);
-      setPredictions([]);
+      console.error('❌ Error searching places:', error);
+      // Try fallback search on network error
+      await performFallbackSearch(query);
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  // Supplemental search to add more results if initial search returned few results
+  const performSupplementalSearch = async (query: string, existingPredictions: PlacePrediction[]) => {
+    if (!apiKey) return;
+    
+    try {
+      console.log('🔍 Performing supplemental search for:', query);
+      
+      // Search with expanded types for popular places
+      const supplementalUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?` +
+        `input=${encodeURIComponent(query)}` +
+        `&key=${apiKey}` +
+        `&components=country:au` +
+        `&language=en` +
+        `&sessiontoken=${Date.now()}` +
+        `&types=establishment`; // Focus on establishments
+      
+      const response = await fetch(supplementalUrl);
+      const data = await response.json();
+      
+      if (data.status === 'OK' && data.predictions && Array.isArray(data.predictions)) {
+        // Merge with existing predictions, avoiding duplicates
+        const existingPlaceIds = new Set(existingPredictions.map(p => p.place_id));
+        const newPredictions = data.predictions.filter(p => !existingPlaceIds.has(p.place_id));
+        
+        const combinedPredictions = [...existingPredictions, ...newPredictions].slice(0, 10);
+        setPredictions(combinedPredictions);
+        
+        console.log('🔍 Supplemental search added', newPredictions.length, 'new results');
+        
+        // If we still have very few results, try the fallback search
+        if (combinedPredictions.length < 2) {
+          console.log('🔍 Still few results, trying fallback search');
+          await performFallbackSearch(query);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Supplemental search error:', error);
+      // Try fallback search on error
+      await performFallbackSearch(query);
+    }
+  };
+
+  // Fallback search without location restrictions for broader results
+  const performFallbackSearch = async (query: string) => {
+    if (!apiKey) return;
+    
+    try {
+      console.log('🔍 Performing fallback search for:', query);
+      
+      // Broader search without location bias and less restrictive parameters
+      const fallbackUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?` +
+        `input=${encodeURIComponent(query)}` +
+        `&key=${apiKey}` +
+        `&language=en` +
+        `&sessiontoken=${Date.now()}`;
+      
+      const response = await fetch(fallbackUrl);
+      const data = await response.json();
+      
+      console.log('🔍 Fallback search response:', {
+        status: data.status,
+        predictionsCount: data.predictions?.length || 0
+      });
+      
+      if (data.status === 'OK' && data.predictions && Array.isArray(data.predictions)) {
+        // Filter results to prioritize Australian locations but include international if relevant
+        const filteredPredictions = data.predictions.filter(prediction => {
+          const description = prediction.description.toLowerCase();
+          // Prioritize Australian results or very relevant international places
+          return description.includes('australia') || 
+                 description.includes('nsw') || 
+                 description.includes('vic') || 
+                 description.includes('qld') || 
+                 description.includes('wa') || 
+                 description.includes('sa') || 
+                 description.includes('tas') || 
+                 description.includes('act') || 
+                 description.includes('nt') ||
+                 prediction.types?.includes('establishment') ||
+                 prediction.types?.includes('point_of_interest');
+        });
+        
+        setPredictions(filteredPredictions.slice(0, 10)); // Limit to 10 results
+      }
+    } catch (error) {
+      console.error('❌ Fallback search error:', error);
     }
   };
 
@@ -129,12 +310,12 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
       return;
     }
 
-    // Debounced search
+    // Faster debounced search - reduced from 300ms to 150ms for better responsiveness
     searchTimeoutRef.current = setTimeout(() => {
       if (isMountedRef.current && text.trim()) {
         searchPlaces(text);
       }
-    }, 300);
+    }, 150);
   }, []);
 
   const handlePredictionSelect = useCallback(async (prediction: PlacePrediction) => {
@@ -248,30 +429,65 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
     }
   };
 
-  const renderPrediction = useCallback(({ item }: { item: PlacePrediction }) => (
-    <Pressable 
-      style={({ pressed }) => [
-        styles.predictionItem,
-        pressed && { backgroundColor: '#F3F4F6' }
-      ]}
-      onPress={() => handlePredictionSelect(item)}
-    >
-      <View style={styles.predictionContent}>
-        <View style={[styles.predictionIcon, { backgroundColor: getFieldColor() }]}>
-          <AntDesign name="enviromento" size={16} color="#FFFFFF" />
+  const getPlaceIcon = (prediction: PlacePrediction) => {
+    const types = prediction.types || [];
+    
+    if (types.includes('restaurant') || types.includes('food') || types.includes('meal_takeaway')) {
+      return 'coffeecup';
+    } else if (types.includes('gas_station')) {
+      return 'car';
+    } else if (types.includes('hospital') || types.includes('pharmacy')) {
+      return 'pluscircleo';
+    } else if (types.includes('bank') || types.includes('atm')) {
+      return 'creditcard';
+    } else if (types.includes('shopping_mall') || types.includes('store')) {
+      return 'shoppingcart';
+    } else if (types.includes('school') || types.includes('university')) {
+      return 'book';
+    } else if (types.includes('gym') || types.includes('park')) {
+      return 'enviromento';
+    } else if (types.includes('establishment') || types.includes('point_of_interest')) {
+      return 'star';
+    } else {
+      return 'enviromento'; // Default for addresses
+    }
+  };
+
+  const renderPrediction = useCallback(({ item }: { item: PlacePrediction }) => {
+    const icon = getPlaceIcon(item);
+    const isEstablishment = item.types?.includes('establishment') || 
+                           item.types?.includes('point_of_interest');
+    
+    return (
+      <Pressable 
+        style={({ pressed }) => [
+          styles.predictionItem,
+          pressed && { backgroundColor: '#F3F4F6' }
+        ]}
+        onPress={() => handlePredictionSelect(item)}
+      >
+        <View style={styles.predictionContent}>
+          <View style={[
+            styles.predictionIcon, 
+            { 
+              backgroundColor: isEstablishment ? getFieldColor() : '#6B7280'
+            }
+          ]}>
+            <AntDesign name={icon as any} size={16} color="#FFFFFF" />
+          </View>
+          <View style={styles.predictionTextContainer}>
+            <Text style={styles.predictionMainText} numberOfLines={1}>
+              {item.structured_formatting.main_text}
+            </Text>
+            <Text style={styles.predictionSecondaryText} numberOfLines={1}>
+              {item.structured_formatting.secondary_text}
+            </Text>
+          </View>
+          <AntDesign name="arrowright" size={16} color="#9CA3AF" />
         </View>
-        <View style={styles.predictionTextContainer}>
-          <Text style={styles.predictionMainText} numberOfLines={1}>
-            {item.structured_formatting.main_text}
-          </Text>
-          <Text style={styles.predictionSecondaryText} numberOfLines={1}>
-            {item.structured_formatting.secondary_text}
-          </Text>
-        </View>
-        <AntDesign name="arrowright" size={16} color="#9CA3AF" />
-      </View>
-    </Pressable>
-  ), [handlePredictionSelect, fieldType]);
+      </Pressable>
+    );
+  }, [handlePredictionSelect, fieldType]);
 
   const renderRecentSearch = useCallback(({ item }: { item: string }) => (
     <Pressable 
@@ -337,11 +553,14 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
         <View style={styles.resultsContainer}>
           {isSearching && (
             <View style={styles.loadingContainer}>
-              <Text style={styles.loadingText}>Searching...</Text>
+              <Text style={styles.loadingText}>Searching places...</Text>
+              <Text style={styles.loadingSubtext}>
+                Looking for businesses, landmarks, and addresses
+              </Text>
             </View>
           )}
 
-          {predictions.length > 0 && (
+          {predictions.length > 0 && !isSearching && (
             <FlatList
               data={predictions}
               renderItem={renderPrediction}
@@ -354,9 +573,12 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
           {predictions.length === 0 && !isSearching && addressText.trim() === '' && (
             <View style={styles.emptyState}>
               <AntDesign name="enviromento" size={48} color="#E5E7EB" />
-              <Text style={styles.emptyStateTitle}>Find your location</Text>
+              <Text style={styles.emptyStateTitle}>Find anywhere</Text>
               <Text style={styles.emptyStateSubtitle}>
-                Enter an address, landmark, or place name
+                Search for businesses, landmarks, restaurants, or street addresses
+              </Text>
+              <Text style={styles.emptyStateSubtitle}>
+                Try: "Starbucks", "Sydney Opera House", "Westfield", or "Collins Street"
               </Text>
             </View>
           )}
@@ -364,9 +586,12 @@ const FullScreenAddressInput: React.FC<FullScreenAddressInputProps> = ({
           {predictions.length === 0 && !isSearching && addressText.trim() !== '' && (
             <View style={styles.emptyState}>
               <AntDesign name="frown" size={48} color="#E5E7EB" />
-              <Text style={styles.emptyStateTitle}>No results found</Text>
+              <Text style={styles.emptyStateTitle}>No places found</Text>
               <Text style={styles.emptyStateSubtitle}>
-                Try a different search term or confirm to use "{addressText}"
+                We searched businesses, landmarks, and addresses but couldn't find "{addressText}"
+              </Text>
+              <Text style={styles.emptyStateSubtitle}>
+                Try a different search term or check the spelling
               </Text>
             </View>
           )}
@@ -473,6 +698,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#6B7280',
     fontWeight: '500',
+  },
+  loadingSubtext: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
   },
   predictionsList: {
     flex: 1,
