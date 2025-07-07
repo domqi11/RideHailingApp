@@ -481,13 +481,6 @@ export default function RideHailingApp() {
       <View style={styles.quickActionsContainer}>
         <Text style={styles.quickActionsTitle}>Quick Actions</Text>
         <View style={styles.quickActions}>
-          <TouchableOpacity style={styles.quickAction} onPress={handleAddStop}>
-            <View style={styles.quickActionIcon}>
-              <AntDesign name="plus" size={20} color="#3B82F6" />
-            </View>
-            <Text style={styles.quickActionText}>Add Stop</Text>
-          </TouchableOpacity>
-          
           <TouchableOpacity style={styles.quickAction}>
             <View style={styles.quickActionIcon}>
               <Feather name="clock" size={20} color="#3B82F6" />
@@ -497,9 +490,16 @@ export default function RideHailingApp() {
           
           <TouchableOpacity style={styles.quickAction}>
             <View style={styles.quickActionIcon}>
-              <MaterialIcons name="group" size={20} color="#3B82F6" />
+              <AntDesign name="heart" size={20} color="#3B82F6" />
             </View>
-            <Text style={styles.quickActionText}>Group Ride</Text>
+            <Text style={styles.quickActionText}>Favourites</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.quickAction} onPress={handleAddStop}>
+            <View style={styles.quickActionIcon}>
+              <AntDesign name="plus" size={20} color="#3B82F6" />
+            </View>
+            <Text style={styles.quickActionText}>Add Stop</Text>
           </TouchableOpacity>
         </View>
       </View>
