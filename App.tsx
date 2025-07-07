@@ -479,27 +479,23 @@ export default function RideHailingApp() {
 
       {/* Quick Actions */}
       <View style={styles.quickActionsContainer}>
-        <Text style={styles.quickActionsTitle}>Quick Actions</Text>
         <View style={styles.quickActions}>
           <TouchableOpacity style={styles.quickAction}>
             <View style={styles.quickActionIcon}>
-              <Feather name="clock" size={20} color="#3B82F6" />
+              <Feather name="clock" size={24} color="#FFFFFF" />
             </View>
-            <Text style={styles.quickActionText}>Schedule</Text>
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.quickAction}>
             <View style={styles.quickActionIcon}>
-              <AntDesign name="heart" size={20} color="#3B82F6" />
+              <AntDesign name="star" size={24} color="#FFFFFF" />
             </View>
-            <Text style={styles.quickActionText}>Favourites</Text>
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.quickAction} onPress={handleAddStop}>
             <View style={styles.quickActionIcon}>
-              <AntDesign name="plus" size={20} color="#3B82F6" />
+              <AntDesign name="plus" size={24} color="#FFFFFF" />
             </View>
-            <Text style={styles.quickActionText}>Add Stop</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -930,7 +926,7 @@ export default function RideHailingApp() {
         <TouchableOpacity style={styles.profileMenuItem}>
           <View style={styles.profileMenuLeft}>
             <View style={[styles.profileMenuIcon, { backgroundColor: '#FED7AA' }]}>
-              <AntDesign name="staro" size={16} color="#EA580C" />
+              <AntDesign name="star" size={16} color="#EA580C" />
             </View>
             <Text style={styles.profileMenuText}>Saved Places</Text>
           </View>
@@ -974,7 +970,7 @@ export default function RideHailingApp() {
         <TouchableOpacity style={styles.profileMenuItem}>
           <View style={styles.profileMenuLeft}>
             <View style={[styles.profileMenuIcon, { backgroundColor: '#FEF3C7' }]}>
-              <AntDesign name="staro" size={16} color="#D97706" />
+              <AntDesign name="star" size={16} color="#D97706" />
             </View>
             <Text style={styles.profileMenuText}>Rate the App</Text>
           </View>
@@ -1250,38 +1246,32 @@ const styles = StyleSheet.create({
   },
   quickActionsContainer: {
     marginBottom: 32,
-  },
-  quickActionsTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 12,
+    alignItems: 'center',
   },
   quickActions: {
     flexDirection: 'row',
-    gap: 16,
+    justifyContent: 'center',
+    gap: 32,
   },
   quickAction: {
-    flex: 1,
-    height: 96,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  quickActionIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: '#3B82F6',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    shadowColor: '#3B82F6',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  quickActionText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#111827',
+  quickActionIcon: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   buttonContainer: {
     marginBottom: 24,
