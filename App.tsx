@@ -36,10 +36,19 @@ import MapViewComponent from './components/MapView';
 import ErrorBoundary from './components/ErrorBoundary';
 import SimpleLocationInput from './components/SimpleLocationInput';
 import AddressManager, { type AddressData } from './components/AddressManager';
+import ApiTest from './components/ApiTest';
+import AuthFlow from './components/AuthFlow';
+import ApiService from './utils/api';
 
 const { width } = Dimensions.get('window');
 
 export default function RideHailingApp() {
+  // Authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // Existing state
   const [currentStep, setCurrentStep] = useState('booking');
   const [selectedRide, setSelectedRide] = useState(null);
   const [currentScreen, setCurrentScreen] = useState('home');
@@ -50,10 +59,74 @@ export default function RideHailingApp() {
   const [destinationLocation, setDestinationLocation] = useState<AddressData | null>(null);
   const [stops, setStops] = useState([]); // Array of stop locations
 
-  // Automatically get user's current location when app loads
+  // Check authentication status on app load
   useEffect(() => {
-    getCurrentLocation();
+    checkAuthStatus();
   }, []);
+
+  // Automatically get user's current location when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      getCurrentLocation();
+    }
+  }, [isAuthenticated]);
+
+  const checkAuthStatus = async () => {
+    try {
+      const token = await ApiService.getAuthToken();
+      if (token) {
+        // Verify token by fetching user profile
+        const response = await ApiService.getProfile();
+        setCurrentUser(response.data.user);
+        setIsAuthenticated(true);
+      }
+    } catch (error) {
+      // Token is invalid or expired
+      await ApiService.clearAuthToken();
+      setIsAuthenticated(false);
+      setCurrentUser(null);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleAuthSuccess = (user: any) => {
+    setCurrentUser(user);
+    setIsAuthenticated(true);
+    setCurrentScreen('home');
+    setCurrentStep('booking');
+  };
+
+  const handleLogout = async () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await ApiService.logout();
+              setIsAuthenticated(false);
+              setCurrentUser(null);
+              setCurrentScreen('home');
+              setCurrentStep('booking');
+              setPickupLocation(null);
+              setDestinationLocation(null);
+              setStops([]);
+            } catch (error) {
+              console.error('Logout error:', error);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const showLocationPermissionHelp = () => {
     Alert.alert(
@@ -1016,10 +1089,14 @@ export default function RideHailingApp() {
       {/* Profile Header */}
       <View style={styles.profileHeader}>
         <View style={styles.profileAvatar}>
-          <Text style={styles.profileAvatarText}>JD</Text>
+          <Text style={styles.profileAvatarText}>
+            {currentUser?.first_name?.[0]}{currentUser?.last_name?.[0]}
+          </Text>
         </View>
-        <Text style={styles.profileName}>John Doe</Text>
-        <Text style={styles.profileEmail}>john.doe@email.com</Text>
+        <Text style={styles.profileName}>
+          {currentUser?.first_name} {currentUser?.last_name}
+        </Text>
+        <Text style={styles.profileEmail}>{currentUser?.email}</Text>
         <View style={styles.profileRating}>
           <AntDesign name="star" size={16} color="#FCD34D" />
           <Text style={styles.profileRatingText}>4.8</Text>
@@ -1132,10 +1209,23 @@ export default function RideHailingApp() {
           </View>
           <AntDesign name="right" size={16} color="#9CA3AF" />
         </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.profileMenuItem}
+          onPress={() => setCurrentScreen('api-test')}
+        >
+          <View style={styles.profileMenuLeft}>
+            <View style={[styles.profileMenuIcon, { backgroundColor: '#DCFCE7' }]}>
+              <Feather name="code" size={16} color="#16A34A" />
+            </View>
+            <Text style={styles.profileMenuText}>🧪 Test Backend API</Text>
+          </View>
+          <AntDesign name="right" size={16} color="#9CA3AF" />
+        </TouchableOpacity>
       </View>
 
       {/* Sign Out */}
-      <TouchableOpacity style={styles.signOutButton}>
+      <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
         <Text style={styles.signOutButtonText}>Sign Out</Text>
       </TouchableOpacity>
     </ScrollView>
@@ -1144,6 +1234,10 @@ export default function RideHailingApp() {
   const renderCurrentScreen = () => {
     if (currentScreen === 'profile') {
       return <ProfileScreen />;
+    }
+    
+    if (currentScreen === 'api-test') {
+      return <ApiTest />;
     }
 
     switch (currentStep) {
@@ -1160,6 +1254,22 @@ export default function RideHailingApp() {
     }
   };
 
+  // Show loading screen while checking auth
+  if (authLoading) {
+    return (
+      <SafeAreaView style={[styles.safeArea, { justifyContent: 'center', alignItems: 'center' }]}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Show auth flow if not authenticated
+  if (!isAuthenticated) {
+    return <AuthFlow onAuthSuccess={handleAuthSuccess} />;
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ErrorBoundary>
@@ -1170,23 +1280,28 @@ export default function RideHailingApp() {
           <View style={styles.appHeader}>
             <View>
               <Text style={styles.appHeaderTitle}>
-                {currentScreen === 'profile' ? 'Profile' : 'Rides'}
+                {currentScreen === 'profile' ? 'Profile' : 
+                 currentScreen === 'api-test' ? 'API Test' : 'Rides'}
               </Text>
               {currentStep === 'booking' && currentScreen === 'home' && (
-                <Text style={styles.appHeaderSubtitle}>Good afternoon, John</Text>
+                <Text style={styles.appHeaderSubtitle}>
+                  Good afternoon, {currentUser?.first_name}
+                </Text>
               )}
             </View>
             <TouchableOpacity
               onPress={handleToggleProfile}
             >
               <View style={styles.headerAvatar}>
-                <Text style={styles.headerAvatarText}>JD</Text>
+                <Text style={styles.headerAvatarText}>
+                  {currentUser?.first_name?.[0]}{currentUser?.last_name?.[0]}
+                </Text>
               </View>
             </TouchableOpacity>
           </View>
 
-          {/* Back Button for Profile */}
-          {currentScreen === 'profile' && (
+          {/* Back Button for Profile and API Test */}
+          {(currentScreen === 'profile' || currentScreen === 'api-test') && (
             <View style={styles.profileBackHeader}>
               <TouchableOpacity
                 style={styles.backButton}
@@ -1937,6 +2052,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     color: '#EF4444',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'white',
+  },
+  loadingText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#6B7280',
   },
   loadingMapContainer: {
     flex: 1,
